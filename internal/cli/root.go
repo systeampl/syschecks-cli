@@ -1,6 +1,9 @@
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+	"github.com/systeampl/syschecks-cli/internal/clierr"
+)
 
 // GlobalFlags holds the persistent flags every command shares.
 type GlobalFlags struct {
@@ -37,8 +40,7 @@ func NewRootCmd() *cobra.Command {
 }
 
 func Execute() int {
-	if err := NewRootCmd().Execute(); err != nil {
-		return 2
-	}
-	return 0
+	root := NewRootCmd()
+	err := root.Execute()
+	return clierr.Code(err)
 }

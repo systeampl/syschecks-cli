@@ -26,6 +26,17 @@ type cmdCtx struct {
 // SDK client, and returns a cmdCtx ready for a command's RunE. On resolution
 // failure it returns a clierr.Config error (exit code 2).
 func cmdEnv(cmd *cobra.Command) (*cmdCtx, error) {
+	return buildCmdCtx(cmd, "")
+}
+
+// cmdEnvWithToken is like cmdEnv but forces tokenOverride as the resolved
+// token, bypassing the usual env/flag/token-file precedence. auth login uses
+// it to validate a candidate token via the SDK before it is ever persisted.
+func cmdEnvWithToken(cmd *cobra.Command, tokenOverride string) (*cmdCtx, error) {
+	return buildCmdCtx(cmd, tokenOverride)
+}
+
+func buildCmdCtx(cmd *cobra.Command, tokenOverride string) (*cmdCtx, error) {
 	gf := globalsFrom(cmd)
 	f, err := config.Load(config.Dir())
 	if err != nil {
@@ -36,6 +47,9 @@ func cmdEnv(cmd *cobra.Command) (*cmdCtx, error) {
 	}, os.Getenv)
 	if err != nil {
 		return nil, clierr.Config("%v", err)
+	}
+	if tokenOverride != "" {
+		r.Token = tokenOverride
 	}
 	sdk, err := sdkclient.New(r)
 	if err != nil {

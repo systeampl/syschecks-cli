@@ -57,8 +57,15 @@ func TokenPath(dir, ctxName string) string {
 
 // WriteToken persists a token for ctxName, creating dir (0700) as needed and
 // writing the token file with 0600 permissions since it is a secret.
+//
+// os.MkdirAll is a no-op on a pre-existing directory (it will not tighten an
+// already-existing, more permissive mode), so we explicitly os.Chmod dir to
+// 0700 afterward to guarantee the invariant regardless of prior state.
 func WriteToken(dir, ctxName, token string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	return os.WriteFile(TokenPath(dir, ctxName), []byte(token), 0o600)

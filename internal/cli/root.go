@@ -35,7 +35,7 @@ func NewRootCmd() *cobra.Command {
 	pf.StringVar(&gf.Token, "token", "", "PAT token (prefer SYSCHECKS_TOKEN env)")
 	pf.BoolVar(&gf.Verbose, "verbose", false, "verbose logging (token redacted)")
 	root.SetContext(withGlobals(root.Context(), gf))
-	root.AddCommand(newVersionCmd(), newAuthCmd(), newOrgCmd(), newProjectCmd())
+	root.AddCommand(newVersionCmd(), newAuthCmd(), newOrgCmd(), newProjectCmd(), newCheckCmd())
 	return root
 }
 

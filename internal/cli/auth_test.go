@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -123,5 +124,35 @@ func TestLogoutIsIdempotentWithNoStoredToken(t *testing.T) {
 	newFakeAPI(t)
 	if err := runCLIErr(t, "auth", "logout"); err != nil {
 		t.Fatalf("logout with no stored token should succeed, got: %v", err)
+	}
+}
+
+// TestLogoutWithMalformedConfigReturnsConfigErrorNotPanic is a regression
+// test: config.Load returns (nil, err) on a malformed config.yaml (anything
+// other than the file not existing), and currentContextName used to
+// discard that error and dereference the nil *config.File, panicking
+// instead of producing a clean clierr.Config exit. logout is the only
+// subcommand that reaches currentContextName without an earlier cmdEnv call
+// surfacing the same Load error first.
+func TestLogoutWithMalformedConfigReturnsConfigErrorNotPanic(t *testing.T) {
+	newFakeAPI(t) // sets XDG_CONFIG_HOME to a fresh temp dir, among other env
+
+	dir := config.Dir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	// current-context is a string field; a YAML sequence here is a type
+	// mismatch that yaml.Unmarshal rejects.
+	malformed := []byte("current-context: [a, b]\n")
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), malformed, 0o600); err != nil {
+		t.Fatalf("write malformed config.yaml: %v", err)
+	}
+
+	err := runCLIErr(t, "auth", "logout")
+	if err == nil {
+		t.Fatal("expected an error for malformed config.yaml, got nil")
+	}
+	if exitCode(err) != 2 {
+		t.Fatalf("exit code = %d, want 2 (config error); err = %v", exitCode(err), err)
 	}
 }

@@ -46,7 +46,11 @@ func newLoginCmd() *cobra.Command {
 				return clierr.Config("token rejected: %v", err)
 			}
 
-			if err := config.WriteToken(config.Dir(), currentContextName(cmd), tok); err != nil {
+			ctxName, err := currentContextName(cmd)
+			if err != nil {
+				return err
+			}
+			if err := config.WriteToken(config.Dir(), ctxName, tok); err != nil {
 				return clierr.Config("writing token: %v", err)
 			}
 			cmd.Printf("Logged in as %s\n", emailOf(me))
@@ -62,7 +66,11 @@ func newLogoutCmd() *cobra.Command {
 		Use:   "logout",
 		Short: "Remove the stored PAT for the current context",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path := config.TokenPath(config.Dir(), currentContextName(cmd))
+			ctxName, err := currentContextName(cmd)
+			if err != nil {
+				return err
+			}
+			path := config.TokenPath(config.Dir(), ctxName)
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return clierr.Config("removing token: %v", err)
 			}
@@ -97,15 +105,22 @@ func newWhoamiCmd() *cobra.Command {
 
 // currentContextName is the context a login/logout call acts on: the
 // --context flag, else the config file's current-context, else "default".
-func currentContextName(cmd *cobra.Command) string {
+// config.Load returns (nil, err) on a malformed config.yaml (anything other
+// than the file not existing), so that error must be propagated rather than
+// discarded — dereferencing a nil *config.File would panic instead of
+// producing the clean clierr.Config exit the CLI contract requires.
+func currentContextName(cmd *cobra.Command) (string, error) {
 	if gf := globalsFrom(cmd); gf.Context != "" {
-		return gf.Context
+		return gf.Context, nil
 	}
-	f, _ := config.Load(config.Dir())
+	f, err := config.Load(config.Dir())
+	if err != nil {
+		return "", clierr.Config("loading config: %v", err)
+	}
 	if f.CurrentContext != "" {
-		return f.CurrentContext
+		return f.CurrentContext, nil
 	}
-	return "default"
+	return "default", nil
 }
 
 // firstNonEmpty returns the first non-empty string in ss, or "".

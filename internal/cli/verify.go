@@ -15,10 +15,12 @@ import (
 // it hits an arbitrary target, not the SysChecks API, so it needs no
 // configured context or token.
 //
-// Exit-code contract: a status or assertion mismatch is a CI-meaningful
-// failure -> clierr.Fail (exit 1). A bad flag or a gojq parse/eval error is a
-// usage/config problem, not something the target did wrong -> clierr.Config
-// (exit 2).
+// Exit-code contract: anything that's the TARGET's fault -- wrong status,
+// a response body that isn't valid JSON, an --expect-json expression that
+// evaluates to non-true -- is a CI-meaningful assertion failure ->
+// clierr.Fail (exit 1). Anything that's the USER's fault -- a missing/bad
+// flag, or an --expect-json EXPRESSION that fails to parse or errors during
+// evaluation -- is a usage/config problem -> clierr.Config (exit 2).
 func newVerifyCmd() *cobra.Command {
 	var target string
 	var expectStatus int
@@ -30,6 +32,15 @@ func newVerifyCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if target == "" {
 				return clierr.Config("--url is required")
+			}
+
+			var query *gojq.Query
+			if expectJSON != "" {
+				q, err := gojq.Parse(expectJSON)
+				if err != nil {
+					return clierr.Config("invalid --expect-json: %v", err)
+				}
+				query = q
 			}
 
 			req, err := http.NewRequestWithContext(cmd.Context(), http.MethodGet, target, nil)
@@ -46,15 +57,10 @@ func newVerifyCmd() *cobra.Command {
 				return clierr.Fail("expected status %d, got %d", expectStatus, resp.StatusCode)
 			}
 
-			if expectJSON != "" {
+			if query != nil {
 				var decoded any
 				if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-					return clierr.Config("decoding response body as JSON: %v", err)
-				}
-
-				query, err := gojq.Parse(expectJSON)
-				if err != nil {
-					return clierr.Config("invalid --expect-json: %v", err)
+					return clierr.Fail("decoding response body as JSON: %v", err)
 				}
 
 				iter := query.Run(decoded)

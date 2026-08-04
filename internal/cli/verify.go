@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/itchyny/gojq"
 	"github.com/spf13/cobra"
@@ -25,6 +26,7 @@ func newVerifyCmd() *cobra.Command {
 	var target string
 	var expectStatus int
 	var expectJSON string
+	var timeout time.Duration
 
 	c := &cobra.Command{
 		Use:   "verify",
@@ -47,7 +49,10 @@ func newVerifyCmd() *cobra.Command {
 			if err != nil {
 				return clierr.Config("building request for %s: %v", target, err)
 			}
-			resp, err := http.DefaultClient.Do(req)
+			// A bounded client, not http.DefaultClient: a target that accepts the
+			// connection and never answers would otherwise hang the CI job that
+			// this command exists to fail.
+			resp, err := (&http.Client{Timeout: timeout}).Do(req)
 			if err != nil {
 				return clierr.Fail("requesting %s: %v", target, err)
 			}
@@ -84,5 +89,6 @@ func newVerifyCmd() *cobra.Command {
 	c.Flags().StringVar(&target, "url", "", "URL to GET (required)")
 	c.Flags().IntVar(&expectStatus, "expect-status", http.StatusOK, "expected HTTP status code")
 	c.Flags().StringVar(&expectJSON, "expect-json", "", "gojq expression asserted true over the decoded JSON body")
+	c.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "abort the request after this long")
 	return c
 }

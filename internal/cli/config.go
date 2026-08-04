@@ -107,7 +107,7 @@ func newGetContextsCmd() *cobra.Command {
 					"organization": ctx.Organization,
 				})
 			}
-			return output.Render(cmd.OutOrStdout(), gf.Output, gf.Quiet, output.Table{Cols: configCols, Rows: rows})
+			return renderTable(cmd.OutOrStdout(), gf.Output, gf.Quiet, gf.NoColor, output.Table{Cols: configCols, Rows: rows})
 		},
 	}
 }

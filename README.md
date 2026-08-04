@@ -98,11 +98,11 @@ syschecks agent list
 syschecks notification list
 syschecks notification test <id>
 
-syschecks probe http <url> [--save --project <id> [--interval <dur>]]
-syschecks probe dns <host>
-syschecks probe tls <host:port>
+syschecks probe http <url> [--save --project <id> [--interval <dur>]] [--timeout <dur>]
+syschecks probe dns <host> [--timeout <dur>]
+syschecks probe tls <host:port> [--timeout <dur>]
 
-syschecks verify --url <url> [--expect-status <code>] [--expect-json <gojq-expr>]
+syschecks verify --url <url> [--expect-status <code>] [--expect-json <gojq-expr>] [--timeout <dur>]
 ```
 
 Global flags (available on every command): `-o, --output table|json|yaml`, `-q, --quiet`, `--no-color`, `--context`, `--org`, `--api-url`, `--token`, `--verbose`.
@@ -111,8 +111,8 @@ Global flags (available on every command): `-o, --output table|json|yaml`, `-q, 
 
 Every command renders through the same output layer, selected with `-o`/`--output`:
 
-- `table` (default) — tab-aligned columns
-- `json` — the row set as a JSON array
+- `table` (default) — tab-aligned columns; check/incident statuses are colour-coded when stdout is a terminal, off under `--no-color` or when piped
+- `json` — the row set as a JSON array, `[]` when empty
 - `yaml` — the row set as YAML
 - `-q`/`--quiet` — only the first column (typically an id or name), one per line, for shell scripting
 
@@ -125,6 +125,8 @@ Exit codes follow a fixed contract so `syschecks` composes cleanly in CI:
 | `2`  | everything else: config, auth, API, or usage errors |
 
 ## `probe` and `verify` are client-side
+
+Every client-side command is bounded by `--timeout` (30s by default), so an unresponsive target fails the job instead of hanging it.
 
 `syschecks probe {http,dns,tls}` and `syschecks verify` talk directly to the target you point them at (via `net/http`, `net`, `crypto/tls`) — they do **not** go through the SysChecks API and need no configured context or token. `probe http --save` is the one exception: it uses the SDK to persist the probed URL as a monitored check, which does require a resolved context/token and `--project <id>`.
 

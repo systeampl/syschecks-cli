@@ -33,6 +33,18 @@ type checkListItem struct {
 // GetCheckDetails while waiting for the check to settle.
 const checkSettlePollInterval = 2 * time.Second
 
+// Listing checks is paged: the API caps a page at 500 and defaults to 100, so
+// asking once returns a slice of a large organization with nothing to say so.
+// checkListMaxPages bounds the walk — a server that ignored ?offset= would
+// otherwise hand back the same page forever.
+const (
+	checkListPageSize = 500
+	checkListMaxPages = 200
+)
+
+// intPtr returns a pointer to i, for the SDK's optional *int params.
+func intPtr(i int) *int { return &i }
+
 // newCheckCmd groups check commands: list, get, run, pause, resume,
 // test-alert.
 func newCheckCmd() *cobra.Command {
@@ -65,7 +77,7 @@ func newCheckListCmd() *cobra.Command {
 			for _, it := range items {
 				rows = append(rows, output.Row{"id": it.Id, "name": it.Name, "type": deref(it.Type), "status": it.Status})
 			}
-			return output.Render(env.Out, env.Format, env.Quiet, output.Table{Cols: checkListCols, Rows: rows})
+			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: checkListCols, Rows: rows})
 		},
 	}
 }
@@ -92,7 +104,7 @@ func newCheckGetCmd() *cobra.Command {
 				"id": c.Id, "name": c.Name, "type": deref(c.Type),
 				"status": string(c.Status), "url": deref(c.Url),
 			}
-			return output.Render(env.Out, env.Format, env.Quiet, output.Table{Cols: checkGetCols, Rows: []output.Row{row}})
+			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: checkGetCols, Rows: []output.Row{row}})
 		},
 	}
 }
@@ -258,15 +270,27 @@ func listChecks(cmd *cobra.Command, env *cmdCtx) ([]checkListItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := env.SDK.Checks.ListChecks(cmd.Context(), &models.ListChecksParams{OrgId: orgID})
-	if err != nil {
-		return nil, clierr.Config("listing checks: %v", err)
+	var all []checkListItem
+	for page := 0; page < checkListMaxPages; page++ {
+		offset := page * checkListPageSize
+		raw, err := env.SDK.Checks.ListChecks(cmd.Context(), &models.ListChecksParams{
+			OrgId:  orgID,
+			Limit:  intPtr(checkListPageSize),
+			Offset: intPtr(offset),
+		})
+		if err != nil {
+			return nil, clierr.Config("listing checks: %v", err)
+		}
+		var items []checkListItem
+		if err := json.Unmarshal(raw, &items); err != nil {
+			return nil, clierr.Config("decoding checks list: %v", err)
+		}
+		all = append(all, items...)
+		if len(items) < checkListPageSize {
+			return all, nil
+		}
 	}
-	var items []checkListItem
-	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, clierr.Config("decoding checks list: %v", err)
-	}
-	return items, nil
+	return all, nil
 }
 
 // boolPtr returns a pointer to b, for the SDK's optional *bool fields.

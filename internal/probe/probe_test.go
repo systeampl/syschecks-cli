@@ -66,7 +66,7 @@ func TestHTTPMeasuresTLSAndCertExpiry(t *testing.T) {
 }
 
 func TestDNSResolvesLocalhost(t *testing.T) {
-	r, err := DNS("localhost")
+	r, err := DNS(context.Background(), "localhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestTLSAgainstLocalServer(t *testing.T) {
 	restore := setRootCAsForTest(pool)
 	defer restore()
 
-	r, err := TLS(srv.Listener.Addr().String())
+	r, err := TLS(context.Background(), srv.Listener.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}

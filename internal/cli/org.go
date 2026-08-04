@@ -33,7 +33,7 @@ func newOrgListCmd() *cobra.Command {
 			for _, o := range *orgs {
 				rows = append(rows, output.Row{"id": o.Id, "name": o.Name, "slug": deref(o.Slug)})
 			}
-			return output.Render(env.Out, env.Format, env.Quiet, output.Table{Cols: orgCols, Rows: rows})
+			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: orgCols, Rows: rows})
 		},
 	}
 }
@@ -53,7 +53,7 @@ func newOrgGetCmd() *cobra.Command {
 				return clierr.Config("getting org %q: %v", args[0], err)
 			}
 			row := output.Row{"id": o.Id, "name": o.Name, "slug": deref(o.Slug)}
-			return output.Render(env.Out, env.Format, env.Quiet, output.Table{Cols: orgCols, Rows: []output.Row{row}})
+			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: orgCols, Rows: []output.Row{row}})
 		},
 	}
 }

@@ -43,7 +43,7 @@ func newNotificationListCmd() *cobra.Command {
 					"channel_type": string(c.ChannelType), "is_active": c.IsActive,
 				})
 			}
-			return output.Render(env.Out, env.Format, env.Quiet, output.Table{Cols: notificationListCols, Rows: rows})
+			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: notificationListCols, Rows: rows})
 		},
 	}
 }

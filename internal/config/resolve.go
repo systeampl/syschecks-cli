@@ -36,6 +36,15 @@ func Resolve(f *File, fl Flags, env func(string) string) (Resolved, error) {
 	if ctxName == "" {
 		ctxName = f.CurrentContext
 	}
+	// A named context that does not exist is a mistake worth reporting: it used
+	// to resolve to the zero value, so a typo silently ran the command against
+	// whatever the environment supplied, or failed further down with a message
+	// about a missing API URL or token that named nothing.
+	if ctxName != "" {
+		if _, ok := f.Contexts[ctxName]; !ok {
+			return Resolved{}, fmt.Errorf("unknown context %q: check `syschecks config get-contexts`", ctxName)
+		}
+	}
 	ctx := f.Contexts[ctxName]
 
 	apiURL := ctx.APIURL

@@ -44,7 +44,7 @@ func newProjectListCmd() *cobra.Command {
 			for _, p := range *projects {
 				rows = append(rows, output.Row{"id": p.Id, "name": p.Name})
 			}
-			return output.Render(env.Out, env.Format, env.Quiet, output.Table{Cols: projectListCols, Rows: rows})
+			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: projectListCols, Rows: rows})
 		},
 	}
 }
@@ -72,7 +72,7 @@ func newProjectGetCmd() *cobra.Command {
 				return clierr.Config("getting project %d: %v", projID, err)
 			}
 			row := output.Row{"id": p.Id, "name": p.Name, "description": deref(p.Description)}
-			return output.Render(env.Out, env.Format, env.Quiet, output.Table{Cols: projectGetCols, Rows: []output.Row{row}})
+			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: projectGetCols, Rows: []output.Row{row}})
 		},
 	}
 }

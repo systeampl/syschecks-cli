@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"net/url"
 	"strings"
 	"time"
@@ -26,6 +27,10 @@ var (
 // configured context or token. `probe http --save` is the one exception: it
 // uses the SDK to persist the probed URL as a monitored check, and needs
 // config resolved via cmdEnv for that.
+// probeDefaultTimeout bounds every client-side probe. Without one these
+// commands wait on the OS, which is not a CI-friendly answer.
+const probeDefaultTimeout = 30 * time.Second
+
 func newProbeCmd() *cobra.Command {
 	c := &cobra.Command{Use: "probe", Short: "Client-side HTTP/DNS/TLS diagnostics"}
 	c.AddCommand(newProbeHTTPCmd(), newProbeDNSCmd(), newProbeTLSCmd())
@@ -36,13 +41,16 @@ func newProbeHTTPCmd() *cobra.Command {
 	var save bool
 	var project int
 	var interval time.Duration
+	var timeout time.Duration
 	c := &cobra.Command{
 		Use:   "http <url>",
 		Short: "Measure a single GET's DNS/connect/TLS/TTFB timings",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
-			r, err := probe.HTTP(cmd.Context(), target)
+			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			defer cancel()
+			r, err := probe.HTTP(ctx, target)
 			if err != nil {
 				return clierr.Config("probing %s: %v", target, err)
 			}
@@ -57,7 +65,7 @@ func newProbeHTTPCmd() *cobra.Command {
 				"total":       r.Total.String(),
 				"cert_expiry": certExpiryString(r.CertExpiry),
 			}
-			if err := output.Render(cmd.OutOrStdout(), gf.Output, gf.Quiet, output.Table{Cols: probeHTTPCols, Rows: []output.Row{row}}); err != nil {
+			if err := renderTable(cmd.OutOrStdout(), gf.Output, gf.Quiet, gf.NoColor, output.Table{Cols: probeHTTPCols, Rows: []output.Row{row}}); err != nil {
 				return err
 			}
 			if !save {
@@ -88,16 +96,20 @@ func newProbeHTTPCmd() *cobra.Command {
 	c.Flags().BoolVar(&save, "save", false, "create a check from this probe")
 	c.Flags().IntVar(&project, "project", 0, "project id to create the check in (required with --save)")
 	c.Flags().DurationVar(&interval, "interval", 60*time.Second, "check interval, used with --save")
+	c.Flags().DurationVar(&timeout, "timeout", probeDefaultTimeout, "abort the probe after this long")
 	return c
 }
 
 func newProbeDNSCmd() *cobra.Command {
-	return &cobra.Command{
+	var timeout time.Duration
+	c := &cobra.Command{
 		Use:   "dns <host>",
 		Short: "Resolve a hostname and time the lookup",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := probe.DNS(args[0])
+			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			defer cancel()
+			r, err := probe.DNS(ctx, args[0])
 			if err != nil {
 				return clierr.Config("resolving %s: %v", args[0], err)
 			}
@@ -106,18 +118,23 @@ func newProbeDNSCmd() *cobra.Command {
 				rows = append(rows, output.Row{"addr": a, "duration": r.Duration.String()})
 			}
 			gf := globalsFrom(cmd)
-			return output.Render(cmd.OutOrStdout(), gf.Output, gf.Quiet, output.Table{Cols: probeDNSCols, Rows: rows})
+			return renderTable(cmd.OutOrStdout(), gf.Output, gf.Quiet, gf.NoColor, output.Table{Cols: probeDNSCols, Rows: rows})
 		},
 	}
+	c.Flags().DurationVar(&timeout, "timeout", probeDefaultTimeout, "abort the lookup after this long")
+	return c
 }
 
 func newProbeTLSCmd() *cobra.Command {
-	return &cobra.Command{
+	var timeout time.Duration
+	c := &cobra.Command{
 		Use:   "tls <host:port>",
 		Short: "Perform a raw TLS handshake and report cert/cipher info",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			r, err := probe.TLS(args[0])
+			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			defer cancel()
+			r, err := probe.TLS(ctx, args[0])
 			if err != nil {
 				return clierr.Config("TLS handshake with %s: %v", args[0], err)
 			}
@@ -128,9 +145,11 @@ func newProbeTLSCmd() *cobra.Command {
 				"dns_names":   strings.Join(r.DNSNames, ","),
 			}
 			gf := globalsFrom(cmd)
-			return output.Render(cmd.OutOrStdout(), gf.Output, gf.Quiet, output.Table{Cols: probeTLSCols, Rows: []output.Row{row}})
+			return renderTable(cmd.OutOrStdout(), gf.Output, gf.Quiet, gf.NoColor, output.Table{Cols: probeTLSCols, Rows: []output.Row{row}})
 		},
 	}
+	c.Flags().DurationVar(&timeout, "timeout", probeDefaultTimeout, "abort the handshake after this long")
+	return c
 }
 
 // certExpiryString formats an optional cert expiry for output: RFC3339 when

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/systeampl/syschecks-cli/internal/clierr"
 	"github.com/systeampl/syschecks-cli/internal/config"
+	"github.com/systeampl/syschecks-cli/internal/output"
 	"github.com/systeampl/syschecks-cli/internal/sdkclient"
 	syschecks "github.com/systeampl/syschecks-go"
 )
@@ -15,11 +16,18 @@ import (
 // output writer/format, and the resolved org — all derived from config
 // resolution via cmdEnv.
 type cmdCtx struct {
-	SDK    *syschecks.Client
-	Out    io.Writer
-	Format string
-	Quiet  bool
-	Org    string
+	SDK     *syschecks.Client
+	Out     io.Writer
+	Format  string
+	Quiet   bool
+	NoColor bool
+	Org     string
+}
+
+// renderTable is output.Render with the colour decision applied: --no-color
+// wins, and colour is only ever used when writing to a terminal.
+func renderTable(w io.Writer, format string, quiet, noColor bool, t output.Table) error {
+	return output.Render(w, format, quiet, t, output.WithColor(output.ShouldColor(w, noColor)))
 }
 
 // cmdEnv resolves config (flags -> context -> env -> token file), builds the
@@ -51,9 +59,14 @@ func buildCmdCtx(cmd *cobra.Command, tokenOverride string) (*cmdCtx, error) {
 	if tokenOverride != "" {
 		r.Token = tokenOverride
 	}
-	sdk, err := sdkclient.New(r)
+	var sdk *syschecks.Client
+	if gf.Verbose {
+		sdk, err = sdkclient.NewVerbose(r, cmd.ErrOrStderr())
+	} else {
+		sdk, err = sdkclient.New(r)
+	}
 	if err != nil {
 		return nil, clierr.Config("building client: %v", err)
 	}
-	return &cmdCtx{SDK: sdk, Out: cmd.OutOrStdout(), Format: gf.Output, Quiet: gf.Quiet, Org: r.Org}, nil
+	return &cmdCtx{SDK: sdk, Out: cmd.OutOrStdout(), Format: gf.Output, Quiet: gf.Quiet, NoColor: gf.NoColor, Org: r.Org}, nil
 }

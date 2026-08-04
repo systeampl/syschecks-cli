@@ -29,9 +29,10 @@ type route struct {
 type fakeAPI struct {
 	*httptest.Server
 
-	mu     sync.Mutex
-	routes map[string]route
-	seen   map[string]url.Values
+	mu       sync.Mutex
+	routes   map[string]route
+	handlers map[string]func(*http.Request) (int, any)
+	seen     map[string]url.Values
 }
 
 // newFakeAPI starts a fake API server and wires the process environment so
@@ -43,7 +44,11 @@ type fakeAPI struct {
 // forces the token under validation instead (see cmdEnvWithToken).
 func newFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
-	f := &fakeAPI{routes: map[string]route{}, seen: map[string]url.Values{}}
+	f := &fakeAPI{
+		routes:   map[string]route{},
+		handlers: map[string]func(*http.Request) (int, any){},
+		seen:     map[string]url.Values{},
+	}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(f.Server.Close)
 
@@ -72,6 +77,16 @@ func (f *fakeAPI) On(method, path string, status int, body any) *fakeAPI {
 	return f
 }
 
+// OnRequest registers a handler for method+path whose response depends on the
+// request itself — needed for paging, where the body varies with ?offset=.
+// It takes precedence over a canned On route for the same method+path.
+func (f *fakeAPI) OnRequest(method, path string, h func(*http.Request) (int, any)) *fakeAPI {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.handlers[method+" "+path] = h
+	return f
+}
+
 // query returns the query string the fake API last saw for method+path, so a
 // test can assert on what the command actually sent (org scoping, filters).
 func (f *fakeAPI) query(method, path string) url.Values {
@@ -83,8 +98,18 @@ func (f *fakeAPI) query(method, path string) url.Values {
 func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.seen[r.Method+" "+r.URL.Path] = r.URL.Query()
+	h, hasHandler := f.handlers[r.Method+" "+r.URL.Path]
 	rt, ok := f.routes[r.Method+" "+r.URL.Path]
 	f.mu.Unlock()
+	if hasHandler {
+		status, body := h(r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if body != nil {
+			_ = json.NewEncoder(w).Encode(body)
+		}
+		return
+	}
 	if !ok {
 		http.Error(w, "no route registered for "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 		return

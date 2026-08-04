@@ -105,9 +105,11 @@ type DNSResult struct {
 }
 
 // DNS resolves host via net.DefaultResolver.LookupHost, timing the lookup.
-func DNS(host string) (DNSResult, error) {
+// ctx bounds the lookup: an unreachable resolver would otherwise stall for as
+// long as the OS resolver decides to.
+func DNS(ctx context.Context, host string) (DNSResult, error) {
 	start := time.Now()
-	addrs, err := net.DefaultResolver.LookupHost(context.Background(), host)
+	addrs, err := net.DefaultResolver.LookupHost(ctx, host)
 	dur := time.Since(start)
 	if err != nil {
 		return DNSResult{}, fmt.Errorf("resolving %s: %w", host, err)
@@ -127,16 +129,20 @@ type TLSResult struct {
 // TLS dials hostPort ("host:port") with tls.Dial and reports the negotiated
 // protocol version, cipher suite, and the leaf certificate's expiry and SAN
 // DNS names.
-func TLS(hostPort string) (TLSResult, error) {
+// ctx bounds the dial and handshake: a peer that accepts the connection and
+// never completes the handshake would otherwise hold the command open.
+func TLS(ctx context.Context, hostPort string) (TLSResult, error) {
 	host, _, err := net.SplitHostPort(hostPort)
 	if err != nil {
 		return TLSResult{}, fmt.Errorf("parsing host:port %q: %w", hostPort, err)
 	}
 
-	conn, err := tls.Dial("tcp", hostPort, &tls.Config{ServerName: host, RootCAs: rootCAsOverride})
+	d := &tls.Dialer{Config: &tls.Config{ServerName: host, RootCAs: rootCAsOverride}}
+	nconn, err := d.DialContext(ctx, "tcp", hostPort)
 	if err != nil {
 		return TLSResult{}, fmt.Errorf("dialing %s: %w", hostPort, err)
 	}
+	conn := nconn.(*tls.Conn)
 	defer conn.Close()
 
 	cs := conn.ConnectionState()

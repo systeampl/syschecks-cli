@@ -47,7 +47,7 @@ func newAgentListCmd() *cobra.Command {
 					"last_seen": it["last_seen"],
 				})
 			}
-			return output.Render(env.Out, env.Format, env.Quiet, output.Table{Cols: agentListCols, Rows: rows})
+			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: agentListCols, Rows: rows})
 		},
 	}
 }

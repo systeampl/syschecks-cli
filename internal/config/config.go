@@ -50,6 +50,23 @@ func Load(dir string) (*File, error) {
 	return &f, nil
 }
 
+// Save writes f as config.yaml under dir, creating dir (0700) as needed. It
+// mirrors WriteToken's permission invariants: 0700 on the directory, 0644 on
+// the file (config.yaml holds no secrets, unlike the token files).
+func Save(dir string, f *File) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	b, err := yaml.Marshal(f)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "config.yaml"), b, 0o644)
+}
+
 // TokenPath returns the path to the token file for a given context name.
 func TokenPath(dir, ctxName string) string {
 	return filepath.Join(dir, "token-"+ctxName)

@@ -3,7 +3,7 @@
 set -euo pipefail
 export SYSCHECKS_API_URL=http://localhost:8001
 export SYSCHECKS_TOKEN="${SYSCHECKS_TOKEN:?set a local PAT}"
-go run . whoami
+go run . auth whoami
 go run . check list -o json | head
 go run . probe http https://example.com
 go run . verify --url https://example.com --expect-status 200 # exit 0

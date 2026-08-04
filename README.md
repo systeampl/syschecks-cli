@@ -55,7 +55,15 @@ syschecks config get-contexts
 syschecks config current-context
 ```
 
-Resolution precedence for a given invocation: `--flag` > active context > environment variable (`SYSCHECKS_API_URL`, `SYSCHECKS_TOKEN`) > token file.
+Resolution precedence for a given invocation (each field resolves independently — see `internal/config/resolve.go`):
+
+| Field     | Precedence (highest first)                                     |
+|-----------|------------------------------------------------------------------|
+| token     | `SYSCHECKS_TOKEN` env > `--token` flag > active context's token file |
+| api_url   | `--api-url` flag > active context > `SYSCHECKS_API_URL` env       |
+| org       | `--org` flag > active context                                     |
+
+Note the token is the one field where the environment variable wins over the flag — this lets a CI job's `SYSCHECKS_TOKEN` env override a stray `--token` in a shared script without editing it.
 
 ## Commands (v0.1)
 

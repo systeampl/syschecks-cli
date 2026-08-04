@@ -45,16 +45,8 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
-homebrew_casks:
-  - name: syschecks
-    repository:
-      owner: systeampl
-      name: homebrew-tap
-    directory: Casks
-    homepage: "https://github.com/systeampl/syschecks-cli"
-    description: "Operational CLI for SysChecks monitoring"
-    binaries:
-      - syschecks
+# Homebrew tap deferred until the systeampl/homebrew-tap repo + a cross-repo
+# token exist. v0.1.0 ships GitHub Release binaries + the install script.
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

@@ -18,9 +18,7 @@ sudo mv syschecks /usr/local/bin/
 
 ### Homebrew
 
-```bash
-brew install systeampl/tap/syschecks
-```
+_Coming soon_ (a `systeampl/homebrew-tap` is planned). For now use the prebuilt binary above or `go install`.
 
 ### Go install
 

@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
-
 	"github.com/spf13/cobra"
 	"github.com/systeampl/syschecks-cli/internal/clierr"
 	"github.com/systeampl/syschecks-cli/internal/output"
@@ -32,8 +30,8 @@ func newIncidentListCmd() *cobra.Command {
 			if err != nil {
 				return clierr.Config("listing incidents: %v", err)
 			}
-			var items []map[string]any
-			if err := json.Unmarshal(raw, &items); err != nil {
+			items, err := extractItems(raw, "incidents")
+			if err != nil {
 				return clierr.Config("decoding incidents list: %v", err)
 			}
 			var rows []output.Row

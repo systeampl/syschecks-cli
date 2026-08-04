@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
-
 	"github.com/spf13/cobra"
 	"github.com/systeampl/syschecks-cli/internal/clierr"
 	"github.com/systeampl/syschecks-cli/internal/output"
@@ -36,8 +34,8 @@ func newAgentListCmd() *cobra.Command {
 			if err != nil {
 				return clierr.Config("listing agents: %v", err)
 			}
-			var items []map[string]any
-			if err := json.Unmarshal(raw, &items); err != nil {
+			items, err := extractItems(raw, "agents")
+			if err != nil {
 				return clierr.Config("decoding agents list: %v", err)
 			}
 			var rows []output.Row

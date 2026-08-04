@@ -46,6 +46,40 @@ func TestAgentList(t *testing.T) {
 	}
 }
 
+// The real API wraps the list in an object (GET /api/incidents ->
+// {total,offset,limit,incidents:[...]}); the CLI must handle that, not only a
+// bare array. Regression test for the wrapped shape found in local testing.
+func TestIncidentListWrappedShape(t *testing.T) {
+	api := newFakeAPI(t)
+	api.On("GET", "/api/incidents", 200, map[string]any{
+		"total": 2, "offset": 0, "limit": 50,
+		"incidents": []map[string]any{
+			{"id": 1, "status": "open"},
+			{"id": 2, "status": "resolved"},
+		},
+	})
+
+	out := runCLIOut(t, "incident", "list", "--status", "open")
+	if !strings.Contains(out, "1") || strings.Contains(out, "resolved") {
+		t.Fatalf("wrapped incident list output = %q (want id 1, not the resolved row)", out)
+	}
+}
+
+// GET /api/organizations/{id}/agents -> {agents:[...],count,max_private_agents}.
+func TestAgentListWrappedShape(t *testing.T) {
+	api := newFakeAPI(t)
+	api.On("GET", "/api/organizations/1/agents", 200, map[string]any{
+		"agents":             []map[string]any{{"id": 1, "name": "agent-a", "status": "online"}},
+		"count":              1,
+		"max_private_agents": 5,
+	})
+
+	out := runCLIOut(t, "--org", "1", "agent", "list")
+	if !strings.Contains(out, "agent-a") {
+		t.Fatalf("wrapped agent list output = %q", out)
+	}
+}
+
 func TestNotificationList(t *testing.T) {
 	api := newFakeAPI(t)
 	api.On("GET", "/api/notification-channels/", 200, []map[string]any{

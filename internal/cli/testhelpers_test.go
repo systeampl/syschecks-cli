@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -30,6 +31,7 @@ type fakeAPI struct {
 
 	mu     sync.Mutex
 	routes map[string]route
+	seen   map[string]url.Values
 }
 
 // newFakeAPI starts a fake API server and wires the process environment so
@@ -41,7 +43,7 @@ type fakeAPI struct {
 // forces the token under validation instead (see cmdEnvWithToken).
 func newFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
-	f := &fakeAPI{routes: map[string]route{}}
+	f := &fakeAPI{routes: map[string]route{}, seen: map[string]url.Values{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(f.Server.Close)
 
@@ -70,8 +72,17 @@ func (f *fakeAPI) On(method, path string, status int, body any) *fakeAPI {
 	return f
 }
 
+// query returns the query string the fake API last saw for method+path, so a
+// test can assert on what the command actually sent (org scoping, filters).
+func (f *fakeAPI) query(method, path string) url.Values {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.seen[method+" "+path]
+}
+
 func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
+	f.seen[r.Method+" "+r.URL.Path] = r.URL.Query()
 	rt, ok := f.routes[r.Method+" "+r.URL.Path]
 	f.mu.Unlock()
 	if !ok {

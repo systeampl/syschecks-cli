@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/systeampl/syschecks-cli/internal/clierr"
 	"github.com/systeampl/syschecks-cli/internal/output"
+	"github.com/systeampl/syschecks-go/models"
 )
 
 // notificationListCols is the column set for `notification list`.
@@ -27,7 +28,11 @@ func newNotificationListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			channels, err := env.SDK.NotificationChannels.ListChannels(cmd.Context(), nil)
+			orgID, err := optionalOrgID(cmd, env)
+			if err != nil {
+				return err
+			}
+			channels, err := env.SDK.NotificationChannels.ListChannels(cmd.Context(), &models.ListChannelsParams{OrgId: orgID})
 			if err != nil {
 				return clierr.Config("listing notification channels: %v", err)
 			}

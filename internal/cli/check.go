@@ -254,7 +254,11 @@ func resolveCheckID(cmd *cobra.Command, env *cmdCtx, arg string) (int, error) {
 // listChecks decodes ListChecks' untyped json.RawMessage response into
 // checkListItems.
 func listChecks(cmd *cobra.Command, env *cmdCtx) ([]checkListItem, error) {
-	raw, err := env.SDK.Checks.ListChecks(cmd.Context(), nil)
+	orgID, err := optionalOrgID(cmd, env)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := env.SDK.Checks.ListChecks(cmd.Context(), &models.ListChecksParams{OrgId: orgID})
 	if err != nil {
 		return nil, clierr.Config("listing checks: %v", err)
 	}

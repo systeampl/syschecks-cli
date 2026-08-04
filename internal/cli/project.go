@@ -94,3 +94,18 @@ func resolveOrgID(cmd *cobra.Command, env *cmdCtx) (int, error) {
 	}
 	return o.Id, nil
 }
+
+// optionalOrgID is resolveOrgID for the cross-organization listings (checks,
+// incidents, notification channels): those stay valid without an organization
+// — they then list everything the token reaches — so an empty --org yields a
+// nil filter rather than the config error resolveOrgID raises.
+func optionalOrgID(cmd *cobra.Command, env *cmdCtx) (*int, error) {
+	if env.Org == "" {
+		return nil, nil
+	}
+	id, err := resolveOrgID(cmd, env)
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
+}

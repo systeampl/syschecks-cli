@@ -4,6 +4,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/systeampl/syschecks-cli/internal/clierr"
 	"github.com/systeampl/syschecks-cli/internal/output"
+	"github.com/systeampl/syschecks-go/models"
 )
 
 // incidentListCols is the column set for `incident list`.
@@ -26,7 +27,11 @@ func newIncidentListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			raw, err := env.SDK.Incidents.ListIncidents(cmd.Context(), nil)
+			orgID, err := optionalOrgID(cmd, env)
+			if err != nil {
+				return err
+			}
+			raw, err := env.SDK.Incidents.ListIncidents(cmd.Context(), &models.ListIncidentsParams{OrganizationId: orgID})
 			if err != nil {
 				return clierr.Config("listing incidents: %v", err)
 			}

@@ -6,8 +6,10 @@ import (
 	"github.com/systeampl/syschecks-go/models"
 )
 
-// teamCols is the column set for `team list`/`team get`, drawn from
-// TeamWithCountsResponse/TeamDetailResponse's shared fields.
+// teamCols is the column set for `team list`/`get`/`create`/`update`: unlike
+// service, every team response shape (TeamWithCountsResponse,
+// TeamDetailResponse, TeamResponse) carries id/name/slug/member_count/
+// is_active, so one Cols (no ListCols) covers all four verbs.
 var teamCols = []string{"id", "name", "slug", "member_count", "is_active"}
 
 // teamFields is the flag/-f schema for `team create`/`team update`, generated
@@ -20,9 +22,17 @@ var teamFields = []Field{
 	{Name: "slug", JSONKey: "slug", Kind: "string", Required: false, Help: "slug"},
 }
 
-// serviceCols is the column set for `service list`/`service get`, drawn from
-// ServiceListItemResponse/ServiceDetailResponse's shared fields.
-var serviceCols = []string{"id", "name", "slug", "health_status", "checks_count", "is_active"}
+// serviceCols is the column set for `service get`/`create`/`update`, which
+// render models.ServiceDetailResponse/ServiceResponse: fields present on
+// both. health_status and checks_count live only on the list response
+// (ServiceListItemResponse) — serviceListCols below, not here, so get/create/
+// update don't render blank cells for them.
+var serviceCols = []string{"id", "name", "slug", "tier", "is_active"}
+
+// serviceListCols is the column set for `service list` specifically
+// (models.ServiceListItemResponse), which carries health_status/checks_count
+// that the single-item responses don't.
+var serviceListCols = []string{"id", "name", "slug", "health_status", "checks_count", "is_active"}
 
 // serviceFields is the flag/-f schema for `service create`/`service update`,
 // generated from the flat scalar fields of models.ServiceCreate: name is the
@@ -93,7 +103,7 @@ func init() {
 	})
 
 	register(&Resource{
-		Name: "service", Cols: serviceCols, Org: OrgArg, Fields: serviceFields,
+		Name: "service", Cols: serviceCols, ListCols: serviceListCols, Org: OrgArg, Fields: serviceFields,
 		listFn: func(env *cmdCtx, orgID *int) ([]map[string]any, error) {
 			services, err := env.SDK.Services.ListServices(context.Background(), *orgID)
 			if err != nil {

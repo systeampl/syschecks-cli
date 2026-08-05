@@ -93,6 +93,54 @@ func TestServiceDeleteHitsOrgServicesPath(t *testing.T) {
 	}
 }
 
+// TestServiceListRendersHealthAndCountColumns drives `service list`: the
+// rendered table must show health_status/checks_count, which only exist on
+// models.ServiceListItemResponse (Resource.ListCols), not on the
+// get/create/update response shapes (Resource.Cols).
+func TestServiceListRendersHealthAndCountColumns(t *testing.T) {
+	api := newFakeAPI(t)
+	api.On("GET", "/api/organizations/by-slug/acme", 200, map[string]any{
+		"id": 1, "name": "Acme", "slug": "acme",
+	})
+	api.On("GET", "/api/organizations/1/services", 200, []map[string]any{
+		{"id": 3, "name": "checkout", "slug": "checkout", "organization_id": 1,
+			"is_active": true, "health_status": "healthy", "checks_count": 5, "down_checks": 0, "degraded_checks": 0},
+	})
+
+	out := runCLIOut(t, "--org", "acme", "service", "list")
+
+	for _, want := range []string{"health_status", "checks_count", "healthy", "checkout"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("service list output missing %q; output = %q", want, out)
+		}
+	}
+}
+
+// TestServiceGetOutputExcludesListOnlyColumns drives `service get <id>`: it
+// renders models.ServiceDetailResponse, which has no health_status field
+// (checks_count exists there but not in ServiceResponse from create/update,
+// so Resource.Cols deliberately excludes both) — the get table must not
+// carry a health_status column at all.
+func TestServiceGetOutputExcludesListOnlyColumns(t *testing.T) {
+	api := newFakeAPI(t)
+	api.On("GET", "/api/organizations/by-slug/acme", 200, map[string]any{
+		"id": 1, "name": "Acme", "slug": "acme",
+	})
+	api.On("GET", "/api/organizations/1/services/3", 200, map[string]any{
+		"id": 3, "name": "checkout", "slug": "checkout", "organization_id": 1,
+		"is_active": true, "tier": "tier-1", "checks_count": 5,
+	})
+
+	out := runCLIOut(t, "--org", "acme", "service", "get", "3")
+
+	if strings.Contains(out, "health_status") {
+		t.Fatalf("service get output must not contain the list-only health_status column: %q", out)
+	}
+	if !strings.Contains(out, "checkout") || !strings.Contains(out, "tier-1") {
+		t.Fatalf("service get output = %q, want it to contain the detail fields", out)
+	}
+}
+
 // TestTeamAndServiceRequireOrg checks OrgArg's required-org contract: an
 // empty --org is a clierr.Config error (exit code 2), not a panic or a
 // silent zero-value org id in the path.

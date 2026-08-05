@@ -54,6 +54,17 @@ func resolveResourceOrg(cmd *cobra.Command, env *cmdCtx, mode OrgMode) (*int, er
 	}
 }
 
+// listCols returns the columns `list` should render: r.ListCols when set,
+// else r.Cols — so a resource whose list response is a different (richer)
+// shape than its get/create/update response can give list its own columns
+// without every other resource having to declare ListCols too.
+func listCols(r *Resource) []string {
+	if len(r.ListCols) > 0 {
+		return r.ListCols
+	}
+	return r.Cols
+}
+
 // renderMany renders a list of resource maps as a table using the resource's
 // declared columns.
 func renderMany(env *cmdCtx, cols []string, items []map[string]any) error {
@@ -86,7 +97,7 @@ func newListCmd(r *Resource) *cobra.Command {
 			if err != nil {
 				return clierr.Config("listing %s: %v", r.Name, err)
 			}
-			return renderMany(env, r.Cols, items)
+			return renderMany(env, listCols(r), items)
 		},
 	}
 }

@@ -32,9 +32,16 @@ type Field struct {
 type Resource struct {
 	Name    string // singular command name, e.g. "team"
 	Aliases []string
-	Cols    []string // table columns for list/get
-	Org     OrgMode
-	Fields  []Field // create/update flag set + -f schema
+	Cols    []string // table columns for get/create/update (and list, when ListCols is empty)
+	// ListCols is the table columns for `list` specifically, when the list
+	// response is a different (typically richer) shape than the single-item
+	// get/create/update responses — e.g. service's list endpoint returns
+	// health_status/checks_count that its detail/create/update responses
+	// don't have. Leave nil/empty to have `list` render Cols, same as every
+	// other verb; only set it when list's response type actually differs.
+	ListCols []string
+	Org      OrgMode
+	Fields   []Field // create/update flag set + -f schema
 
 	listFn   func(env *cmdCtx, orgID *int) ([]map[string]any, error)
 	getFn    func(env *cmdCtx, orgID *int, id int) (map[string]any, error)

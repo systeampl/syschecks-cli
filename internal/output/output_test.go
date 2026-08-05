@@ -100,3 +100,34 @@ func TestColorDoesNotChangeTheLayout(t *testing.T) {
 }
 
 var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// JSON numbers decode into float64, and %v prints large ones in scientific notation:
+// an incident id came out as "2.774001e+06". Ids are the one thing a CLI must print
+// verbatim — they get pasted into the next command.
+func TestIntegralNumbersRenderAsIntegers(t *testing.T) {
+	tbl := Table{Cols: []string{"id"}, Rows: []Row{{"id": float64(2774001)}}}
+
+	var table bytes.Buffer
+	if err := Render(&table, "table", false, tbl); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(table.String(), "2774001") {
+		t.Fatalf("table rendered %q, want the plain integer", table.String())
+	}
+
+	var quiet bytes.Buffer
+	if err := Render(&quiet, "table", true, tbl); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.TrimSpace(quiet.String()) != "2774001" {
+		t.Fatalf("quiet rendered %q, want %q", quiet.String(), "2774001")
+	}
+}
+
+func TestFractionalNumbersKeepTheirValue(t *testing.T) {
+	var b bytes.Buffer
+	_ = Render(&b, "table", true, Table{Cols: []string{"x"}, Rows: []Row{{"x": 99.9}}})
+	if strings.TrimSpace(b.String()) != "99.9" {
+		t.Fatalf("rendered %q, want %q", b.String(), "99.9")
+	}
+}

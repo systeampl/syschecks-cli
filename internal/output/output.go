@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -98,6 +100,17 @@ func colorizeLine(line string) string {
 	return line
 }
 
+// cell renders one value for the human-facing formats. JSON numbers arrive as float64,
+// and %v prints them with an exponent once they get long enough — an incident id came out
+// as "2.774001e+06". Ids are meant to be copied into the next command, so integral values
+// print as integers; anything fractional keeps its own formatting.
+func cell(v any) string {
+	if f, ok := v.(float64); ok && f == math.Trunc(f) && math.Abs(f) < 1e15 {
+		return strconv.FormatInt(int64(f), 10)
+	}
+	return fmt.Sprintf("%v", v)
+}
+
 func Render(w io.Writer, format string, quiet bool, t Table, opts ...Option) error {
 	var o renderOpts
 	for _, opt := range opts {
@@ -114,7 +127,7 @@ func Render(w io.Writer, format string, quiet bool, t Table, opts ...Option) err
 
 	if quiet {
 		for _, r := range t.Rows {
-			fmt.Fprintln(w, r[t.Cols[0]])
+			fmt.Fprintln(w, cell(r[t.Cols[0]]))
 		}
 		return nil
 	}
@@ -148,7 +161,7 @@ func Render(w io.Writer, format string, quiet bool, t Table, opts ...Option) err
 				if i > 0 {
 					fmt.Fprint(tw, "\t")
 				}
-				fmt.Fprintf(tw, "%v", r[c])
+				fmt.Fprint(tw, cell(r[c]))
 			}
 			fmt.Fprintln(tw)
 		}

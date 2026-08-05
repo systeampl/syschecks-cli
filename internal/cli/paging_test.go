@@ -105,7 +105,8 @@ func TestIncidentListFiltersOverEveryPage(t *testing.T) {
 				status = "DOWN"
 			}
 			items = append(items, map[string]any{
-				"id": idx, "check_name": "c", "status": status, "started_at": "2026-01-01T00:00:00Z",
+				"start_log_id": idx, "check_name": "c", "max_status": status,
+				"started_at": "2026-01-01T00:00:00Z",
 			})
 		}
 		return 200, map[string]any{"incidents": items, "total": total}

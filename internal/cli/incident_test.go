@@ -8,28 +8,28 @@ import (
 func TestIncidentListStatusFilter(t *testing.T) {
 	api := newFakeAPI(t)
 	api.On("GET", "/api/incidents", 200, []map[string]any{
-		{"id": 1, "status": "open"},
-		{"id": 2, "status": "resolved"},
+		{"start_log_id": 1, "max_status": "DOWN"},
+		{"start_log_id": 2, "max_status": "DEGRADED"},
 	})
 
-	out := runCLIOut(t, "incident", "list", "--status", "open")
+	out := runCLIOut(t, "incident", "list", "--status", "DOWN")
 	if !strings.Contains(out, "1") {
-		t.Fatalf("incident list --status open output = %q (want id 1)", out)
+		t.Fatalf("incident list --status DOWN output = %q (want id 1)", out)
 	}
-	if strings.Contains(out, "resolved") {
-		t.Fatalf("incident list --status open output = %q (should not contain filtered-out row)", out)
+	if strings.Contains(out, "DEGRADED") {
+		t.Fatalf("incident list --status DOWN output = %q (should not contain filtered-out row)", out)
 	}
 }
 
 func TestIncidentListNoFilter(t *testing.T) {
 	api := newFakeAPI(t)
 	api.On("GET", "/api/incidents", 200, []map[string]any{
-		{"id": 1, "check": "web", "status": "open", "started_at": "2026-01-01T00:00:00Z"},
-		{"id": 2, "check": "db", "status": "resolved", "started_at": "2026-01-02T00:00:00Z"},
+		{"start_log_id": 1, "check_name": "web", "max_status": "DOWN", "started_at": "2026-01-01T00:00:00Z"},
+		{"start_log_id": 2, "check_name": "db", "max_status": "DEGRADED", "started_at": "2026-01-02T00:00:00Z"},
 	})
 
 	out := runCLIOut(t, "incident", "list")
-	if !strings.Contains(out, "open") || !strings.Contains(out, "resolved") {
+	if !strings.Contains(out, "DOWN") || !strings.Contains(out, "DEGRADED") {
 		t.Fatalf("incident list output = %q (want both statuses)", out)
 	}
 }
@@ -54,14 +54,14 @@ func TestIncidentListWrappedShape(t *testing.T) {
 	api.On("GET", "/api/incidents", 200, map[string]any{
 		"total": 2, "offset": 0, "limit": 50,
 		"incidents": []map[string]any{
-			{"id": 1, "status": "open"},
-			{"id": 2, "status": "resolved"},
+			{"start_log_id": 1, "max_status": "DOWN"},
+			{"start_log_id": 2, "max_status": "DEGRADED"},
 		},
 	})
 
-	out := runCLIOut(t, "incident", "list", "--status", "open")
-	if !strings.Contains(out, "1") || strings.Contains(out, "resolved") {
-		t.Fatalf("wrapped incident list output = %q (want id 1, not the resolved row)", out)
+	out := runCLIOut(t, "incident", "list", "--status", "DOWN")
+	if !strings.Contains(out, "1") || strings.Contains(out, "DEGRADED") {
+		t.Fatalf("wrapped incident list output = %q (want id 1, not the filtered-out row)", out)
 	}
 }
 

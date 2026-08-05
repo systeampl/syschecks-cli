@@ -10,6 +10,16 @@ import (
 // incidentListCols is the column set for `incident list`.
 var incidentListCols = []string{"id", "check", "status", "started_at"}
 
+// The API names these differently from the columns we print: an incident is identified
+// by the log row that opened it, the check by name, and the status is the worst one the
+// incident reached. Reading `id`/`check`/`status` straight off the payload yielded empty
+// cells on every row.
+const (
+	incidentIDField     = "start_log_id"
+	incidentCheckField  = "check_name"
+	incidentStatusField = "max_status"
+)
+
 // newIncidentCmd groups incident read commands: list.
 func newIncidentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "incident", Short: "Incidents"}
@@ -38,14 +48,14 @@ func newIncidentListCmd() *cobra.Command {
 			var rows []output.Row
 			for _, it := range items {
 				if status != "" {
-					if s, _ := it["status"].(string); s != status {
+					if s, _ := it[incidentStatusField].(string); s != status {
 						continue
 					}
 				}
 				rows = append(rows, output.Row{
-					"id":         it["id"],
-					"check":      it["check"],
-					"status":     it["status"],
+					"id":         it[incidentIDField],
+					"check":      it[incidentCheckField],
+					"status":     it[incidentStatusField],
 					"started_at": it["started_at"],
 				})
 			}

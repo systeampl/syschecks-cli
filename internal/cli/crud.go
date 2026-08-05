@@ -161,35 +161,9 @@ func registerFieldFlags(c *cobra.Command, fields []Field, fv *fieldValues) {
 	}
 }
 
-// bodyFromFlags builds a request body from the flags registered by
-// registerFieldFlags: only flags the user actually set (Changed) are
-// included, so update issues a partial body. enforceRequired gates the
-// missing-required-flag check, on for create and off for update. Task 2
-// replaces this with bodyFromFlagsAndFile, which overlays these same flags
-// on top of a -f document; this flags-only version is Task 1's scope.
-func bodyFromFlags(cmd *cobra.Command, fields []Field, fv *fieldValues, enforceRequired bool) (map[string]any, error) {
-	body := map[string]any{}
-	for _, f := range fields {
-		if !cmd.Flags().Changed(f.Name) {
-			if enforceRequired && f.Required {
-				return nil, clierr.Config("missing required flag --%s", f.Name)
-			}
-			continue
-		}
-		switch f.Kind {
-		case "int":
-			body[f.JSONKey] = *fv.ints[f.Name]
-		case "bool":
-			body[f.JSONKey] = *fv.bools[f.Name]
-		default:
-			body[f.JSONKey] = *fv.strs[f.Name]
-		}
-	}
-	return body, nil
-}
-
 func newCreateCmd(r *Resource) *cobra.Command {
 	fv := newFieldValues(r.Fields)
+	var file string
 	c := &cobra.Command{
 		Use:   "create",
 		Short: "Create a " + r.Name,
@@ -202,7 +176,7 @@ func newCreateCmd(r *Resource) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			body, err := bodyFromFlags(cmd, r.Fields, fv, true)
+			body, err := bodyFromFlagsAndFile(cmd, r.Fields, fv, file, true)
 			if err != nil {
 				return err
 			}
@@ -214,11 +188,13 @@ func newCreateCmd(r *Resource) *cobra.Command {
 		},
 	}
 	registerFieldFlags(c, r.Fields, fv)
+	c.Flags().StringVarP(&file, "file", "f", "", "path to a YAML/JSON document to load as the request body (flags override matching fields)")
 	return c
 }
 
 func newUpdateCmd(r *Resource) *cobra.Command {
 	fv := newFieldValues(r.Fields)
+	var file string
 	c := &cobra.Command{
 		Use:   "update <id>",
 		Short: "Update a " + r.Name,
@@ -236,7 +212,7 @@ func newUpdateCmd(r *Resource) *cobra.Command {
 			if err != nil {
 				return clierr.Config("invalid %s id %q: %v", r.Name, args[0], err)
 			}
-			body, err := bodyFromFlags(cmd, r.Fields, fv, false)
+			body, err := bodyFromFlagsAndFile(cmd, r.Fields, fv, file, false)
 			if err != nil {
 				return err
 			}
@@ -248,6 +224,7 @@ func newUpdateCmd(r *Resource) *cobra.Command {
 		},
 	}
 	registerFieldFlags(c, r.Fields, fv)
+	c.Flags().StringVarP(&file, "file", "f", "", "path to a YAML/JSON document to load as the request body (flags override matching fields)")
 	return c
 }
 

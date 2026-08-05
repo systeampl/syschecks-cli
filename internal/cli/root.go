@@ -39,7 +39,7 @@ func NewRootCmd() *cobra.Command {
 	pf.BoolVar(&gf.Verbose, "verbose", false, "verbose logging (token redacted)")
 	root.SetContext(withGlobals(root.Context(), gf))
 	root.AddCommand(newVersionCmd(), newAuthCmd(), newConfigCmd(), newOrgCmd(), newProjectCmd(), newCheckCmd(),
-		newIncidentCmd(), newAgentCmd(), newNotificationCmd(), newProbeCmd(), newVerifyCmd())
+		newIncidentCmd(), newAgentCmd(), newNotificationCmd(), newProbeCmd(), newVerifyCmd(), newApplyCmd())
 	return root
 }
 

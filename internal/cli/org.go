@@ -66,7 +66,17 @@ func init() {
 			return toMap(o)
 		},
 		deleteFn: func(env *cmdCtx, _ *int, id int) error {
-			_, err := env.SDK.Organizations.DeleteOrganization(context.Background(), id, &models.DeleteOrganizationParams{})
+			// DeleteOrganizationParams.Confirm "must equal the organization
+			// name to confirm deletion" (SDK doc) — unlike the other three
+			// resources' deletes, this one takes a required param. The user
+			// already passed the CLI's own --yes confirmation gate, so
+			// fetching the name and supplying it automatically is correct
+			// rather than asking the user to type it again.
+			o, err := env.SDK.Organizations.GetOrganization(context.Background(), id)
+			if err != nil {
+				return err
+			}
+			_, err = env.SDK.Organizations.DeleteOrganization(context.Background(), id, &models.DeleteOrganizationParams{Confirm: &o.Name})
 			return err
 		},
 	})

@@ -1,51 +1,89 @@
 package cli
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/systeampl/syschecks-cli/internal/clierr"
-	"github.com/systeampl/syschecks-cli/internal/output"
 	"github.com/systeampl/syschecks-go/models"
 )
 
-// notificationListCols is the column set for `notification list`.
+// notificationListCols is the column set for `notification list`/`get`.
 var notificationListCols = []string{"id", "name", "channel_type", "is_active"}
 
-// newNotificationCmd groups notification channel commands: list, test <id>.
-func newNotificationCmd() *cobra.Command {
-	c := &cobra.Command{Use: "notification", Short: "Notification channels"}
-	c.AddCommand(newNotificationListCmd(), newNotificationTestCmd())
-	return c
+// notificationFields is the flag/-f schema for `notification create`/
+// `notification update`, generated from the flat scalar fields of
+// models.NotificationChannelCreate; config (the per-channel-type payload) is
+// -f-only since it's a nested object, not a flag.
+var notificationFields = []Field{
+	{Name: "channel-type", JSONKey: "channel_type", Kind: "string", Required: true, Help: "channel type"},
+	{Name: "is-active", JSONKey: "is_active", Kind: "bool", Required: false, Help: "is active"},
+	{Name: "name", JSONKey: "name", Kind: "string", Required: true, Help: "name"},
+	{Name: "organization-id", JSONKey: "organization_id", Kind: "int", Required: false, Help: "organization id"},
 }
 
-func newNotificationListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List notification channels",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			env, err := cmdEnv(cmd)
+func init() {
+	register(&Resource{
+		Name: "notification", Cols: notificationListCols, Org: OrgParam, Fields: notificationFields,
+		listFn: func(env *cmdCtx, orgID *int) ([]map[string]any, error) {
+			channels, err := env.SDK.NotificationChannels.ListChannels(context.Background(), &models.ListChannelsParams{OrgId: orgID})
 			if err != nil {
-				return err
+				return nil, err
 			}
-			orgID, err := optionalOrgID(cmd, env)
-			if err != nil {
-				return err
-			}
-			channels, err := env.SDK.NotificationChannels.ListChannels(cmd.Context(), &models.ListChannelsParams{OrgId: orgID})
-			if err != nil {
-				return clierr.Config("listing notification channels: %v", err)
-			}
-			var rows []output.Row
+			items := make([]map[string]any, 0, len(*channels))
 			for _, c := range *channels {
-				rows = append(rows, output.Row{
-					"id": c.Id, "name": c.Name,
-					"channel_type": string(c.ChannelType), "is_active": c.IsActive,
-				})
+				m, err := toMap(c)
+				if err != nil {
+					return nil, err
+				}
+				items = append(items, m)
 			}
-			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: notificationListCols, Rows: rows})
+			return items, nil
 		},
-	}
+		getFn: func(env *cmdCtx, _ *int, id int) (map[string]any, error) {
+			c, err := env.SDK.NotificationChannels.GetChannel(context.Background(), id)
+			if err != nil {
+				return nil, err
+			}
+			return toMap(c)
+		},
+		createFn: func(env *cmdCtx, _ *int, body map[string]any) (map[string]any, error) {
+			b, err := mapToBody[models.NotificationChannelCreate](body)
+			if err != nil {
+				return nil, err
+			}
+			c, err := env.SDK.NotificationChannels.CreateChannel(context.Background(), b)
+			if err != nil {
+				return nil, err
+			}
+			return toMap(c)
+		},
+		updateFn: func(env *cmdCtx, _ *int, id int, body map[string]any) (map[string]any, error) {
+			b, err := mapToBody[models.NotificationChannelUpdate](body)
+			if err != nil {
+				return nil, err
+			}
+			c, err := env.SDK.NotificationChannels.UpdateChannel(context.Background(), id, b)
+			if err != nil {
+				return nil, err
+			}
+			return toMap(c)
+		},
+		deleteFn: func(env *cmdCtx, _ *int, id int) error {
+			_, err := env.SDK.NotificationChannels.DeleteChannel(context.Background(), id)
+			return err
+		},
+	})
+}
+
+// newNotificationCmd builds the `notification` command from the registry
+// (list/get/create/update/delete) plus the bespoke `test` subcommand, which
+// has no registry equivalent (it isn't a CRUD verb).
+func newNotificationCmd() *cobra.Command {
+	c := newResourceCmd(registry["notification"])
+	c.AddCommand(newNotificationTestCmd())
+	return c
 }
 
 func newNotificationTestCmd() *cobra.Command {

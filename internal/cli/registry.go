@@ -69,3 +69,20 @@ func toMap(v any) (map[string]any, error) {
 	}
 	return m, nil
 }
+
+// mapToBody round-trips a -f/flag body map into a typed SDK request body T
+// via JSON, the inverse of toMap: it's how a createFn/updateFn closure turns
+// the registry's normalized map[string]any into the concrete
+// models.<X>Create/<X>Update struct the SDK call expects, without any
+// hand-written field-by-field mapping.
+func mapToBody[T any](m map[string]any) (T, error) {
+	var t T
+	b, err := json.Marshal(m)
+	if err != nil {
+		return t, err
+	}
+	if err := json.Unmarshal(b, &t); err != nil {
+		return t, err
+	}
+	return t, nil
+}

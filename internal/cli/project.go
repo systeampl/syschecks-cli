@@ -1,80 +1,84 @@
 package cli
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/systeampl/syschecks-cli/internal/clierr"
-	"github.com/systeampl/syschecks-cli/internal/output"
+	"github.com/systeampl/syschecks-go/models"
 )
 
-// projectListCols/projectGetCols are the column sets for `project list` and
-// `project get` respectively; get additionally shows the description.
-var (
-	projectListCols = []string{"id", "name"}
-	projectGetCols  = []string{"id", "name", "description"}
-)
+// projectCols is the column set for both `project list` and `project get`:
+// list and get render through the same registry Resource, so this has to be
+// the union of what each showed before (get additionally has description).
+var projectCols = []string{"id", "name", "description"}
 
-// newProjectCmd groups project read commands: list, get <id>. Both need an
-// organization, resolved via resolveOrgID from the --org global flag.
-func newProjectCmd() *cobra.Command {
-	c := &cobra.Command{Use: "project", Short: "Projects"}
-	c.AddCommand(newProjectListCmd(), newProjectGetCmd())
-	return c
+// projectFields is the flag/-f schema for `project create`/`project update`,
+// generated from the flat scalar fields of models.ProjectCreate: just name.
+var projectFields = []Field{
+	{Name: "name", JSONKey: "name", Kind: "string", Required: true, Help: "name"},
 }
 
-func newProjectListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List projects in an organization",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			env, err := cmdEnv(cmd)
+func init() {
+	register(&Resource{
+		Name: "project", Cols: projectCols, Org: OrgArg, Fields: projectFields,
+		listFn: func(env *cmdCtx, orgID *int) ([]map[string]any, error) {
+			projects, err := env.SDK.Organizations.ListOrganizationProjects(context.Background(), *orgID, nil)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			orgID, err := resolveOrgID(cmd, env)
-			if err != nil {
-				return err
-			}
-			projects, err := env.SDK.Organizations.ListOrganizationProjects(cmd.Context(), orgID, nil)
-			if err != nil {
-				return clierr.Config("listing projects: %v", err)
-			}
-			var rows []output.Row
+			items := make([]map[string]any, 0, len(*projects))
 			for _, p := range *projects {
-				rows = append(rows, output.Row{"id": p.Id, "name": p.Name})
+				m, err := toMap(p)
+				if err != nil {
+					return nil, err
+				}
+				items = append(items, m)
 			}
-			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: projectListCols, Rows: rows})
+			return items, nil
 		},
-	}
+		getFn: func(env *cmdCtx, orgID *int, id int) (map[string]any, error) {
+			p, err := env.SDK.Organizations.GetOrganizationProject(context.Background(), *orgID, id)
+			if err != nil {
+				return nil, err
+			}
+			return toMap(p)
+		},
+		createFn: func(env *cmdCtx, orgID *int, body map[string]any) (map[string]any, error) {
+			b, err := mapToBody[models.ProjectCreate](body)
+			if err != nil {
+				return nil, err
+			}
+			p, err := env.SDK.Organizations.CreateOrganizationProject(context.Background(), *orgID, b)
+			if err != nil {
+				return nil, err
+			}
+			return toMap(p)
+		},
+		updateFn: func(env *cmdCtx, orgID *int, id int, body map[string]any) (map[string]any, error) {
+			b, err := mapToBody[models.ProjectUpdate](body)
+			if err != nil {
+				return nil, err
+			}
+			p, err := env.SDK.Organizations.UpdateOrganizationProject(context.Background(), *orgID, id, b)
+			if err != nil {
+				return nil, err
+			}
+			return toMap(p)
+		},
+		deleteFn: func(env *cmdCtx, orgID *int, id int) error {
+			_, err := env.SDK.Organizations.DeleteOrganizationProject(context.Background(), *orgID, id)
+			return err
+		},
+	})
 }
 
-func newProjectGetCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "get <id>",
-		Short: "Show a single project",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			env, err := cmdEnv(cmd)
-			if err != nil {
-				return err
-			}
-			orgID, err := resolveOrgID(cmd, env)
-			if err != nil {
-				return err
-			}
-			projID, err := strconv.Atoi(args[0])
-			if err != nil {
-				return clierr.Config("invalid project id %q: %v", args[0], err)
-			}
-			p, err := env.SDK.Organizations.GetOrganizationProject(cmd.Context(), orgID, projID)
-			if err != nil {
-				return clierr.Config("getting project %d: %v", projID, err)
-			}
-			row := output.Row{"id": p.Id, "name": p.Name, "description": deref(p.Description)}
-			return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: projectGetCols, Rows: []output.Row{row}})
-		},
-	}
+// newProjectCmd builds the `project` command straight from the registry:
+// unlike org/check, project's `get` was already a plain numeric lookup, so
+// the generic factory's list/get/create/update/delete need no overrides.
+func newProjectCmd() *cobra.Command {
+	return newResourceCmd(registry["project"])
 }
 
 // resolveOrgID resolves the organization id project commands operate on from

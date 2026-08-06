@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/spf13/cobra"
 	"github.com/systeampl/syschecks-go/models"
 )
 
@@ -30,28 +31,34 @@ var statusPageFields = []Field{
 }
 
 // lifecycleWatchCols is the column set for `lifecycle-watch`
-// list/get/create/update: get/list render models.LifecycleWatchResponse, and
-// create/update (both backed by the untyped Upsert endpoint, see
-// upsertLifecycleWatch below) decode into the same shape. channel_ids/
-// channel_names ([]int/[]string) are left off, same as playbook's steps.
+// list/get/create (there is no `update`, see the registration below):
+// get/list render models.LifecycleWatchResponse, and create (backed by the
+// untyped Upsert endpoint, see upsertLifecycleWatch below) decodes into the
+// same shape. channel_ids/channel_names ([]int/[]string) are left off, same
+// as playbook's steps.
 var lifecycleWatchCols = []string{
 	"id", "resource_type", "resource_id", "vendor", "platform",
 	"notify_on_new", "notify_7d", "notify_30d", "notify_90d",
 }
 
-// lifecycleWatchFields is the flag/-f schema for `lifecycle-watch create`/
-// `lifecycle-watch update`, generated from the flat scalar fields of
-// models.LifecycleWatchUpsert: vendor is the only required field.
-// channel_ids ([]int) is a nested/array field with no flag — it is -f-only.
+// lifecycleWatchFields is the flag/-f schema for `lifecycle-watch create`
+// (there is no `update` — see the registration below): generated from the
+// flat scalar fields of models.LifecycleWatchUpsert, plus vendor/
+// resource-type/resource-id promoted to Required even though the SDK model
+// only marks Vendor non-optional. UpsertLifecycleWatch has no id path arg —
+// the server keys the upsert by exactly these three fields, so a `create`
+// that omitted one would silently upsert against an incomplete/wrong key
+// instead of failing client-side. channel_ids ([]int) is a nested/array
+// field with no flag — it is -f-only.
 var lifecycleWatchFields = []Field{
 	{Name: "notify-30d", JSONKey: "notify_30d", Kind: "bool", Required: false, Help: "notify 30 days before end of life"},
 	{Name: "notify-7d", JSONKey: "notify_7d", Kind: "bool", Required: false, Help: "notify 7 days before end of life"},
 	{Name: "notify-90d", JSONKey: "notify_90d", Kind: "bool", Required: false, Help: "notify 90 days before end of life"},
 	{Name: "notify-on-new", JSONKey: "notify_on_new", Kind: "bool", Required: false, Help: "notify on newly discovered resource"},
 	{Name: "platform", JSONKey: "platform", Kind: "string", Required: false, Help: "platform"},
-	{Name: "resource-id", JSONKey: "resource_id", Kind: "string", Required: false, Help: "resource id"},
-	{Name: "resource-type", JSONKey: "resource_type", Kind: "string", Required: false, Help: "resource type"},
-	{Name: "vendor", JSONKey: "vendor", Kind: "string", Required: true, Help: "vendor"},
+	{Name: "resource-id", JSONKey: "resource_id", Kind: "string", Required: true, Help: "resource id (part of the upsert key)"},
+	{Name: "resource-type", JSONKey: "resource_type", Kind: "string", Required: true, Help: "resource type (part of the upsert key)"},
+	{Name: "vendor", JSONKey: "vendor", Kind: "string", Required: true, Help: "vendor (part of the upsert key)"},
 }
 
 func init() {
@@ -131,15 +138,21 @@ func init() {
 			}
 			return toMap(w)
 		},
-		// createFn and updateFn both map to UpsertLifecycleWatch: the API has no
-		// separate create/update for lifecycle watches, only an idempotent
-		// upsert keyed by (resource_type, vendor, resource_id) in the body — not
-		// by an id path arg. updateFn's id argument is therefore ignored; there
-		// is no id field on models.LifecycleWatchUpsert to put it in.
+		// createFn maps to UpsertLifecycleWatch: the API has no separate
+		// create/update for lifecycle watches, only an idempotent upsert keyed
+		// by (vendor, resource_type, resource_id) in the body — not by an id
+		// path arg. There is deliberately no updateFn: an id-addressable
+		// `lifecycle-watch update <id>` would be misleading (the id is
+		// discarded; the SDK call has nowhere to put it) and, worse, unsafe —
+		// bodyFromFlagsAndFile only enforces Required on create, so an
+		// `update <id>` with no flags at all would silently upsert an
+		// empty-keyed watch rather than touching <id>. Re-running `create` with
+		// the same key fields is the supported way to change an existing
+		// watch's notification settings; newLifecycleWatchCmd documents this on
+		// the `create` subcommand. See newApplyCmd/applyDoc (apply.go), which
+		// already turns a nil updateFn into a clierr.Config error for any `-f`
+		// document that carries an "id" for this kind, rather than panicking.
 		createFn: func(env *cmdCtx, orgID *int, body map[string]any) (map[string]any, error) {
-			return upsertLifecycleWatch(env, *orgID, body)
-		},
-		updateFn: func(env *cmdCtx, orgID *int, _ int, body map[string]any) (map[string]any, error) {
 			return upsertLifecycleWatch(env, *orgID, body)
 		},
 		deleteFn: func(env *cmdCtx, orgID *int, id int) error {
@@ -147,6 +160,28 @@ func init() {
 			return err
 		},
 	})
+}
+
+// newLifecycleWatchCmd builds the `lifecycle-watch` command from the registry
+// (list/get/create/delete — no `update`, see the registration in init above)
+// and documents the upsert semantics of `create` on its own Long text, since
+// the generic factory's "Create a lifecycle-watch" Short is misleading on its
+// own: running `create` again with the same vendor/resource-type/resource-id
+// updates the existing watch's notification settings in place rather than
+// erroring or duplicating it.
+func newLifecycleWatchCmd() *cobra.Command {
+	c := newResourceCmd(registry["lifecycle-watch"])
+	for _, sc := range c.Commands() {
+		if sc.Name() == "create" {
+			sc.Long = "Create or update a lifecycle watch.\n\n" +
+				"This is an idempotent upsert keyed by --vendor/--resource-type/--resource-id " +
+				"(all three required): the underlying API has no id-addressable update, so " +
+				"running `create` again with the same vendor/resource-type/resource-id changes " +
+				"that watch's notification settings in place instead of creating a duplicate. " +
+				"There is no `lifecycle-watch update` command."
+		}
+	}
+	return c
 }
 
 // upsertLifecycleWatch drives Lifecycle.UpsertLifecycleWatch, which — unlike

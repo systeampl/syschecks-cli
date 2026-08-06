@@ -93,7 +93,7 @@ func newIncidentAcknowledgeCmd() *cobra.Command {
 				return err
 			}
 			var body models.AcknowledgeIncidentJSONRequestBody
-			if note != "" {
+			if cmd.Flags().Changed("note") {
 				body.Note = &note
 			}
 			raw, err := env.SDK.Incidents.AcknowledgeIncident(cmd.Context(), checkID, logID, body)

@@ -126,7 +126,14 @@ func Render(w io.Writer, format string, quiet bool, t Table, opts ...Option) err
 	}
 
 	if quiet {
+		// A table with no columns (e.g. rendering an untyped {} response) has
+		// nothing to key the first cell off of: print a blank line per row
+		// rather than indexing t.Cols[0] out of range.
 		for _, r := range t.Rows {
+			if len(t.Cols) == 0 {
+				fmt.Fprintln(w)
+				continue
+			}
 			fmt.Fprintln(w, cell(r[t.Cols[0]]))
 		}
 		return nil

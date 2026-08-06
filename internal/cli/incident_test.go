@@ -161,9 +161,9 @@ func TestIncidentAcknowledgeAlias(t *testing.T) {
 	}
 }
 
-// TestIncidentAcknowledgeNoNote checks that an empty --note posts a body
-// without a "note" key at all (the field is optional in
-// AcknowledgeIncidentJSONRequestBody), not an empty string.
+// TestIncidentAcknowledgeNoNote checks that omitting --note entirely posts a
+// body without a "note" key at all (the field is optional in
+// AcknowledgeIncidentJSONRequestBody).
 func TestIncidentAcknowledgeNoNote(t *testing.T) {
 	api := newFakeAPI(t)
 	var gotBody map[string]any
@@ -179,6 +179,75 @@ func TestIncidentAcknowledgeNoNote(t *testing.T) {
 	if _, ok := gotBody["note"]; ok {
 		t.Fatalf("incident acknowledge body must not carry an unset note: %#v", gotBody)
 	}
+}
+
+// TestIncidentAcknowledgeExplicitEmptyNote checks that an *explicit*
+// `--note ""` is distinguishable from omitting the flag: it must still send
+// a "note" key (with an empty value), because whether the flag was passed is
+// decided via cmd.Flags().Changed("note"), not by comparing the string
+// against "". Regression test for a bug where `note != ""` conflated the two.
+func TestIncidentAcknowledgeExplicitEmptyNote(t *testing.T) {
+	api := newFakeAPI(t)
+	var gotBody map[string]any
+	api.OnRequest("POST", "/api/checks/5/incidents/9/ack", func(r *http.Request) (int, any) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decoding incident acknowledge request body: %v", err)
+		}
+		return 200, map[string]any{"start_log_id": 9, "acknowledged": true}
+	})
+
+	runCLIOut(t, "incident", "acknowledge", "5", "9", "--note", "")
+
+	note, ok := gotBody["note"]
+	if !ok {
+		t.Fatalf("incident acknowledge --note \"\" must still send a note key: %#v", gotBody)
+	}
+	if note != "" {
+		t.Fatalf("incident acknowledge --note \"\" body note = %v, want empty string", note)
+	}
+}
+
+// TestIncidentResolveEmptyPayloadDefaultFormat is a regression test: a
+// resolve/ack confirmation can come back as a bare {} with no fields, which
+// used to crash output.Render's --quiet path (it indexed t.Cols[0] on an
+// empty Cols slice) and otherwise rendered a header-only, columnless table.
+// In the default (table) format this must now print a short confirmation
+// with no panic and exit 0.
+func TestIncidentResolveEmptyPayloadDefaultFormat(t *testing.T) {
+	api := newFakeAPI(t)
+	api.On("POST", "/api/checks/5/incidents/9/resolve", 200, map[string]any{})
+
+	out := runCLIOut(t, "incident", "resolve", "5", "9")
+
+	if strings.TrimSpace(out) == "" {
+		t.Fatalf("incident resolve on an empty {} payload printed nothing: %q", out)
+	}
+}
+
+// TestIncidentResolveEmptyPayloadQuiet is the --quiet counterpart of
+// TestIncidentResolveEmptyPayloadDefaultFormat: this is the exact repro from
+// the review finding (a bare {} resolve/ack response with --quiet used to
+// panic with "index out of range [0] with length 0").
+func TestIncidentResolveEmptyPayloadQuiet(t *testing.T) {
+	api := newFakeAPI(t)
+	api.On("POST", "/api/checks/5/incidents/9/resolve", 200, map[string]any{})
+
+	out := runCLIOut(t, "--quiet", "incident", "resolve", "5", "9")
+
+	// No panic and exit 0 (guaranteed by runCLIOut, which fails the test on
+	// a non-nil error) is the load-bearing assertion here; --quiet output
+	// for a columnless row has nothing meaningful to print, so it's allowed
+	// to be blank.
+	_ = out
+}
+
+// TestIncidentAcknowledgeEmptyPayloadQuiet covers the same empty-{}-payload
+// panic on the acknowledge path (POST .../ack), not just resolve.
+func TestIncidentAcknowledgeEmptyPayloadQuiet(t *testing.T) {
+	api := newFakeAPI(t)
+	api.On("POST", "/api/checks/5/incidents/9/ack", 200, map[string]any{})
+
+	runCLIOut(t, "--quiet", "incident", "acknowledge", "5", "9")
 }
 
 // TestIncidentResolve drives `incident resolve <check_id> <log_id>`: it must

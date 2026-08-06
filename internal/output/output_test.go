@@ -131,3 +131,18 @@ func TestFractionalNumbersKeepTheirValue(t *testing.T) {
 		t.Fatalf("rendered %q, want %q", b.String(), "99.9")
 	}
 }
+
+// A table with rows but no columns (e.g. an untyped {} API response with no
+// fields to key on) used to panic in the --quiet path: it indexed t.Cols[0]
+// unconditionally, with no bounds check for an empty Cols slice. Regression
+// test for that crash — one row, zero columns, quiet mode.
+func TestRenderQuietWithNoColumnsDoesNotPanic(t *testing.T) {
+	var b bytes.Buffer
+	tbl := Table{Cols: nil, Rows: []Row{{}}}
+	if err := Render(&b, "table", true, tbl); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if got := b.String(); got != "\n" {
+		t.Fatalf("quiet with no columns = %q, want a single blank line", got)
+	}
+}

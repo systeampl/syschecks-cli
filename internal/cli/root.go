@@ -40,7 +40,8 @@ func NewRootCmd() *cobra.Command {
 	root.SetContext(withGlobals(root.Context(), gf))
 	root.AddCommand(newVersionCmd(), newAuthCmd(), newConfigCmd(), newOrgCmd(), newProjectCmd(), newCheckCmd(),
 		newIncidentCmd(), newAgentCmd(), newNotificationCmd(), newProbeCmd(), newVerifyCmd(), newApplyCmd(),
-		newResourceCmd(registry["team"]), newResourceCmd(registry["service"]))
+		newResourceCmd(registry["team"]), newResourceCmd(registry["service"]),
+		newResourceCmd(registry["oncall-schedule"]), newResourceCmd(registry["escalation-policy"]))
 	return root
 }
 

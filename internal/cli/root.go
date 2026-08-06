@@ -43,7 +43,7 @@ func NewRootCmd() *cobra.Command {
 		newResourceCmd(registry["team"]), newResourceCmd(registry["service"]),
 		newResourceCmd(registry["oncall-schedule"]), newResourceCmd(registry["escalation-policy"]),
 		newResourceCmd(registry["maintenance-window"]), newResourceCmd(registry["playbook"]),
-		newResourceCmd(registry["status-page"]), newResourceCmd(registry["lifecycle-watch"]))
+		newResourceCmd(registry["status-page"]), newLifecycleWatchCmd())
 	return root
 }
 

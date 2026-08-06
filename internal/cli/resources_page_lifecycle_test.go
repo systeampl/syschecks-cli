@@ -142,38 +142,83 @@ func TestLifecycleWatchCreatePostsUpsert(t *testing.T) {
 	}
 }
 
-// TestLifecycleWatchUpdateAlsoPostsUpsert drives `lifecycle-watch update <id>`
-// and confirms the irregular contract: update ignores the id path arg
-// entirely and reuses the very same upsert POST as create (there is no PUT
-// /api/organizations/{id}/lifecycle-watches/{id} in the generated SDK).
-func TestLifecycleWatchUpdateAlsoPostsUpsert(t *testing.T) {
+// TestLifecycleWatchHasNoUpdateSubcommand checks the footgun fix directly:
+// lifecycle-watch's updateFn is nil (there is no id-addressable update, only
+// the keyed upsert exposed as `create`), and newResourceCmd only ever adds a
+// subcommand for a non-nil verb — so `update` must not appear at all rather
+// than existing and silently discarding the id / upserting an empty key.
+func TestLifecycleWatchHasNoUpdateSubcommand(t *testing.T) {
+	c := newLifecycleWatchCmd()
+	for _, sc := range c.Commands() {
+		if sc.Name() == "update" {
+			t.Fatalf("lifecycle-watch has an %q subcommand, want none (update is not id-addressable; use create)", sc.Name())
+		}
+	}
+	if _, _, err := c.Find([]string{"update"}); err == nil {
+		t.Fatal("lifecycle-watch: cobra resolved an \"update\" subcommand, want not found")
+	}
+}
+
+// TestLifecycleWatchCreateMissingKeyFieldIsConfigError checks that `create`
+// fails client-side (exit code 2) when any of the three upsert key fields
+// (vendor/resource-type/resource-id) is missing, rather than POSTing an
+// incomplete-key upsert to the API.
+func TestLifecycleWatchCreateMissingKeyFieldIsConfigError(t *testing.T) {
 	api := newFakeAPI(t)
 	api.On("GET", "/api/organizations/by-slug/acme", 200, map[string]any{
 		"id": 1, "name": "Acme", "slug": "acme",
 	})
-	var gotBody map[string]any
-	api.OnRequest("POST", "/api/organizations/1/lifecycle-watches", func(r *http.Request) (int, any) {
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("decoding lifecycle-watch update request body: %v", err)
-		}
-		return 200, map[string]any{
-			"id": 11, "organization_id": 1, "user_id": 1, "vendor": "aws",
-			"resource_type": "rds-instance", "resource_id": "db-1", "platform": "postgres",
-			"notify_on_new": true, "notify_7d": true, "notify_30d": true, "notify_90d": true,
-		}
+	var posted bool
+	api.OnRequest("POST", "/api/organizations/1/lifecycle-watches", func(*http.Request) (int, any) {
+		posted = true
+		return 200, map[string]any{}
 	})
 
-	out := runCLIOut(t, "--org", "acme", "lifecycle-watch", "update", "11",
-		"--vendor", "aws", "--resource-type", "rds-instance", "--resource-id", "db-1", "--notify-90d")
+	// resource-id is omitted.
+	err := runCLIErr(t, "--org", "acme", "lifecycle-watch", "create", "--vendor", "aws", "--resource-type", "rds-instance")
 
-	if gotBody == nil {
-		t.Fatal("lifecycle-watch update never POSTed /api/organizations/1/lifecycle-watches")
+	if err == nil {
+		t.Fatal("lifecycle-watch create with no --resource-id: want error, got nil")
 	}
-	if gotBody["notify_90d"] != true {
-		t.Fatalf("lifecycle-watch update body notify_90d = %v, want true (body=%#v)", gotBody["notify_90d"], gotBody)
+	if exitCode(err) != 2 {
+		t.Fatalf("lifecycle-watch create with no --resource-id: exit code = %d, want 2 (err=%v)", exitCode(err), err)
 	}
-	if !strings.Contains(out, "11") {
-		t.Fatalf("lifecycle-watch update output = %q", out)
+	if posted {
+		t.Fatal("lifecycle-watch create with a missing key field must not POST to the API at all")
+	}
+}
+
+// TestLifecycleWatchApplyUpdateDocIsConfigError checks apply.go's nil-verb
+// guard for this specific resource: an `apply -f` document with kind:
+// lifecycle-watch and an "id" must fail with a clear clierr.Config error
+// ("does not support update"), not a nil-func panic, since updateFn is nil.
+func TestLifecycleWatchApplyUpdateDocIsConfigError(t *testing.T) {
+	api := newFakeAPI(t)
+	api.On("GET", "/api/organizations/by-slug/acme", 200, map[string]any{
+		"id": 1, "name": "Acme", "slug": "acme",
+	})
+	var posted bool
+	api.OnRequest("POST", "/api/organizations/1/lifecycle-watches", func(*http.Request) (int, any) {
+		posted = true
+		return 200, map[string]any{}
+	})
+
+	doc := "kind: lifecycle-watch\nid: 11\nvendor: aws\nresource_type: rds-instance\nresource_id: db-1\n"
+	path := writeTempFile(t, "lifecycle-watch-update.yaml", doc)
+
+	err := runCLIErr(t, "--org", "acme", "apply", "-f", path)
+
+	if err == nil {
+		t.Fatal("apply -f (lifecycle-watch with id): want error, got nil")
+	}
+	if exitCode(err) != 2 {
+		t.Fatalf("apply -f (lifecycle-watch with id): exit code = %d, want 2 (err=%v)", exitCode(err), err)
+	}
+	if !strings.Contains(err.Error(), "does not support update") {
+		t.Fatalf("apply -f (lifecycle-watch with id): error = %q, want it to mention %q", err.Error(), "does not support update")
+	}
+	if posted {
+		t.Fatal("apply -f (lifecycle-watch with id) must not POST to the API when updateFn is nil")
 	}
 }
 

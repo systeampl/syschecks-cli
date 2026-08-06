@@ -9,6 +9,9 @@
 // Only attributes that are Required or Optional are writable from HCL and
 // included here; attributes that are Computed-only (id, created_at,
 // updated_at, status, uuid, member_count, ...) are read-only and excluded.
+// Attr.Secret mirrors the provider's Sensitive: true 1:1 — every attribute the
+// provider marks Sensitive is Secret here, so an HCL emitter that redacts on
+// Attr.Secret never writes a provider-sensitive value in plaintext.
 // See hack/extract-provider-schema.sh for the extraction recipe used to
 // regenerate this list when the provider schema changes.
 package generate
@@ -84,14 +87,14 @@ var specs = map[string]*ResourceSpec{
 			{Name: "db_port", Kind: AttrInt},
 			{Name: "db_name", Kind: AttrString},
 			{Name: "db_username", Kind: AttrString},
-			{Name: "db_password", Kind: AttrString, Secret: true},
+			{Name: "db_password", Kind: AttrString, Secret: true}, // Sensitive: true
 			{Name: "db_ssl_enabled", Kind: AttrBool},
 			{Name: "db_query", Kind: AttrString},
 			{Name: "db_expected_result", Kind: AttrString},
 			// HTTP auth (auth_password / auth_bearer_token are write-only secrets).
 			{Name: "auth_username", Kind: AttrString},
-			{Name: "auth_password", Kind: AttrString, Secret: true},
-			{Name: "auth_bearer_token", Kind: AttrString, Secret: true},
+			{Name: "auth_password", Kind: AttrString, Secret: true},     // Sensitive: true
+			{Name: "auth_bearer_token", Kind: AttrString, Secret: true}, // Sensitive: true
 			{Name: "http_body", Kind: AttrString},
 			{Name: "http_body_type", Kind: AttrString},
 			{Name: "http_follow_redirects", Kind: AttrBool},
@@ -103,10 +106,9 @@ var specs = map[string]*ResourceSpec{
 			{Name: "http_form_login_url", Kind: AttrString},
 			{Name: "http_form_login_success_text", Kind: AttrString},
 			{Name: "http_form_check_after_login_url", Kind: AttrString},
-			// FTP/SFTP (ftp_password is a write-only secret in the provider, too —
-			// not in this task's required Secret set; see report concerns).
+			// FTP/SFTP.
 			{Name: "ftp_username", Kind: AttrString},
-			{Name: "ftp_password", Kind: AttrString},
+			{Name: "ftp_password", Kind: AttrString, Secret: true}, // Sensitive: true
 			{Name: "ftp_protocol", Kind: AttrString},
 			{Name: "ftp_path", Kind: AttrString},
 			{Name: "ftp_passive", Kind: AttrBool},
@@ -141,10 +143,10 @@ var specs = map[string]*ResourceSpec{
 			{Name: "assigned_agent_ids", Kind: AttrList},
 			// JSON-object/array fields (jsontypes.Normalized StringAttribute —
 			// HCL-wise still a string, written as jsonencode(...)).
-			{Name: "http_headers", Kind: AttrString},
-			{Name: "http_form_login_data", Kind: AttrString},
+			{Name: "http_headers", Kind: AttrString, Secret: true},         // Sensitive: true — commonly carries Authorization/API keys
+			{Name: "http_form_login_data", Kind: AttrString, Secret: true}, // Sensitive: true — typically contains {username, password}
 			{Name: "api_scenario_steps", Kind: AttrString},
-			{Name: "api_scenario_secrets", Kind: AttrString},
+			{Name: "api_scenario_secrets", Kind: AttrString, Secret: true}, // Sensitive: true — write-only
 			{Name: "oidc_config", Kind: AttrString},
 			{Name: "dns_records_config", Kind: AttrString},
 			{Name: "check_source_critical", Kind: AttrString},

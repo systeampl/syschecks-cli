@@ -42,7 +42,8 @@ func NewRootCmd() *cobra.Command {
 		newIncidentCmd(), newAgentCmd(), newNotificationCmd(), newProbeCmd(), newVerifyCmd(), newApplyCmd(),
 		newResourceCmd(registry["team"]), newResourceCmd(registry["service"]),
 		newResourceCmd(registry["oncall-schedule"]), newResourceCmd(registry["escalation-policy"]),
-		newResourceCmd(registry["maintenance-window"]), newResourceCmd(registry["playbook"]))
+		newResourceCmd(registry["maintenance-window"]), newResourceCmd(registry["playbook"]),
+		newResourceCmd(registry["status-page"]), newResourceCmd(registry["lifecycle-watch"]))
 	return root
 }
 

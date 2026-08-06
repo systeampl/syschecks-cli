@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -76,7 +77,7 @@ func newApplyCmd() *cobra.Command {
 		Use:   "apply",
 		Short: "Create or update resources from a YAML/JSON file (kind: <resource> per document)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			b, err := os.ReadFile(file)
+			b, err := readApplySource(cmd, file)
 			if err != nil {
 				return clierr.Config("reading -f %s: %v", file, err)
 			}
@@ -97,9 +98,19 @@ func newApplyCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().StringVarP(&file, "file", "f", "", "path to a YAML/JSON file with one or more documents to apply")
+	c.Flags().StringVarP(&file, "file", "f", "", "path to a YAML/JSON file with one or more documents to apply (\"-\" reads stdin, enabling `get -o yaml | apply -f -`)")
 	_ = c.MarkFlagRequired("file")
 	return c
+}
+
+// readApplySource reads -f's document bytes: "-" reads cmd's stdin (so
+// `get -o yaml | apply -f -` can pipe a document straight in without a
+// temp file), anything else is a path read via os.ReadFile.
+func readApplySource(cmd *cobra.Command, file string) ([]byte, error) {
+	if file == "-" {
+		return io.ReadAll(cmd.InOrStdin())
+	}
+	return os.ReadFile(file)
 }
 
 // splitYAMLDocs splits b into documents on any line that is exactly "---"

@@ -1,6 +1,6 @@
 # syschecks
 
-`syschecks` is an operational command-line client for [SysChecks](https://github.com/systeampl) monitoring: manage organizations, projects, checks, incidents, agents and notification channels, plus run client-side HTTP/DNS/TLS diagnostics — all from the terminal, scriptable in CI.
+`syschecks` is an operational command-line client for [SysChecks](https://github.com/systeampl) monitoring: full CRUD over organizations, projects, checks, teams, services, on-call schedules, escalation policies, maintenance windows, playbooks, status pages, lifecycle watches, contact methods and integration keys, plus incident/agent actions and notification channels, plus client-side HTTP/DNS/TLS diagnostics — all from the terminal, scriptable in CI.
 
 It is built on the [`syschecks-go`](https://github.com/systeampl/syschecks-go) SDK, which is the shared client underneath the CLI and (eventually) the Terraform/Ansible/Pulumi/Salt providers.
 
@@ -63,7 +63,7 @@ Resolution precedence for a given invocation (each field resolves independently 
 
 Note the token is the one field where the environment variable wins over the flag — this lets a CI job's `SYSCHECKS_TOKEN` env override a stray `--token` in a shared script without editing it.
 
-## Commands (v0.1)
+## Commands
 
 ```
 syschecks version
@@ -78,26 +78,6 @@ syschecks config use-context <name>
 syschecks config get-contexts
 syschecks config current-context
 
-syschecks org list
-syschecks org get <slug>
-
-syschecks project list
-syschecks project get <id>
-
-syschecks check list
-syschecks check get <id|name>
-syschecks check run <id|name> [--wait] [--timeout <dur>]
-syschecks check pause <id|name>
-syschecks check resume <id|name>
-syschecks check test-alert <id|name>
-
-syschecks incident list [--status <status>]
-
-syschecks agent list
-
-syschecks notification list
-syschecks notification test <id>
-
 syschecks probe http <url> [--save --project <id> [--interval <dur>]] [--timeout <dur>]
 syschecks probe dns <host> [--timeout <dur>]
 syschecks probe tls <host:port> [--timeout <dur>]
@@ -106,6 +86,87 @@ syschecks verify --url <url> [--expect-status <code>] [--expect-json <gojq-expr>
 ```
 
 Global flags (available on every command): `-o, --output table|json|yaml`, `-q, --quiet`, `--no-color`, `--context`, `--org`, `--api-url`, `--token`, `--verbose`.
+
+### CRUD resources (v0.2)
+
+Every resource below follows the same shape:
+
+```
+syschecks <resource> list
+syschecks <resource> get <id>
+syschecks <resource> create [--<field> <value> ...] [-f <file.yaml>]
+syschecks <resource> update <id> [--<field> <value> ...] [-f <file.yaml>]
+syschecks <resource> delete <id> [--yes]
+```
+
+Only the subcommands the SysChecks API actually exposes for that resource are generated — there is never a leaf that would just fail on the wire. `--<field>` flags exist for every flat scalar field of that resource's create/update payload (run `syschecks <resource> create --help` for the full flag list — `check create` alone has ~70, one per check-type setting); nested/array fields (HTTP headers, escalation steps, rotation members, DNS expected IPs, ...) have no flag and are `-f`-only. `create`/`update` accept `--field` flags and/or `-f <file>` together: the file supplies a base document, then any flag that was actually passed overrides the same key — see [Hybrid input](#hybrid-input-flags--f) below.
+
+| resource | list | get | create | update | delete | org scope | notes |
+|---|---|---|---|---|---|---|---|
+| `org` | ✓ | ✓ (by slug) | ✓ | ✓ | ✓ | none | `org get <slug>`, not an id |
+| `project` | ✓ | ✓ | ✓ | ✓ | ✓ | required `--org` | |
+| `check` | ✓ | ✓ (by id or name) | ✓ | ✓ | ✓ | optional `--org` | plus `run`/`pause`/`resume`/`test-alert` (below) |
+| `notification` | ✓ | ✓ | ✓ | ✓ | ✓ | optional `--org` | plus `test` (below) |
+| `team` | ✓ | ✓ | ✓ | ✓ | ✓ | required `--org` | |
+| `service` | ✓ | ✓ | ✓ | ✓ | ✓ | required `--org` | `list` shows extra `health_status`/`checks_count` columns |
+| `oncall-schedule` | ✓ | ✓ | ✓ | ✓ | ✓ | required `--org` | rotations are `-f`-only |
+| `escalation-policy` | ✓ | ✓ | ✓ | ✓ | ✓ | required `--org` | steps are `-f`-only |
+| `maintenance-window` | ✓ | ✓ | ✓ | ✓ | ✓ | optional `--org` | |
+| `playbook` | ✓ | ✓ | ✓ | ✓ | ✓ | required `--org` | steps are `-f`-only |
+| `status-page` | ✓ | ✓ | ✓ | ✓ | ✓ | none | |
+| `lifecycle-watch` | ✓ | ✓ | ✓ (upsert) | – | ✓ | required `--org` | **no update**: `create` is an idempotent upsert keyed by `--vendor`/`--resource-type`/`--resource-id` — run it again with the same key to change notification settings |
+| `contact-method` | ✓ | – | ✓ | ✓ | ✓ | none | **no get**: the API has no single-contact-method lookup |
+| `integration-key` | ✓ | – | ✓ | – | ✓ (revoke) | required `--org` | **no get/update**: create-then-revoke only |
+
+### `apply -f` (declarative, multi-doc)
+
+```
+syschecks apply -f <file.yaml>
+syschecks apply -f -   # read the document(s) from stdin
+```
+
+`apply` accepts one or more YAML/JSON documents separated by a line containing exactly `---`. Each document must carry a `kind: <resource>` field (one of the resource names above); a document with an `id` is routed to that resource's `update`, one without is routed to `create`. `-f -` reads from stdin instead of a file, so `syschecks <resource> get <id> -o yaml` output can be piped straight into `apply` — a real get response doesn't carry a `kind` field yet, so a `kind: <resource>` line has to be added to the piped document first (e.g. with `yq` or a small wrapper script); once it does, `get -o yaml | apply -f -` reproduces the same `update` request body a direct `syschecks <resource> update <id>` call would have sent (see `internal/cli/roundtrip_test.go`, which asserts exactly this for `check` and `team`).
+
+Example:
+
+```yaml
+kind: check
+id: 42
+url: https://example.com/health
+---
+kind: team
+name: platform
+```
+
+### Hybrid input: flags + `-f`
+
+`create`/`update` build their request body by loading `-f <file>` (if given) as the base document, then overlaying any `--field` flag that was actually passed on the command line — flags win over the file, and a field present only in the file still satisfies a `create`-time required field. This lets a script keep the bulk of a resource's config in a checked-in YAML file while overriding one value per invocation:
+
+```
+syschecks check update 42 -f check.yaml --interval 30
+```
+
+### Non-CRUD actions
+
+```
+syschecks check run <id|name> [--wait] [--timeout <dur>]
+syschecks check pause <id|name>
+syschecks check resume <id|name>
+syschecks check test-alert <id|name>
+
+syschecks notification test <id>
+
+syschecks incident list [--status <status>]
+syschecks incident get <check_id> <log_id>
+syschecks incident acknowledge <check_id> <log_id> [--note <text>]   # alias: ack
+syschecks incident resolve <check_id> <log_id>
+
+syschecks agent list
+syschecks agent token
+syschecks agent delete <agent_id>   # alias: rm
+```
+
+Incidents are addressed by the `(check_id, log_id)` pair the API uses, not a single id, so they don't fit the generic CRUD factory. Agents have no `create`/`get`: they self-register against the API using the token `agent token` mints, and there is no single-agent lookup endpoint.
 
 ## Output and exit codes
 

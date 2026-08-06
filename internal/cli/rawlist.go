@@ -47,5 +47,20 @@ func renderRawObject(env *cmdCtx, raw json.RawMessage) error {
 		cols = append(cols, k)
 	}
 	sort.Strings(cols)
+
+	// A bare {} confirmation (ack/resolve often carry nothing) has no
+	// columns to key a row on. output.Render's quiet mode is guarded against
+	// an empty Cols slice at the root (it would otherwise index t.Cols[0]
+	// out of range), but a "table" with a header row and no columns is still
+	// just confusing noise on a terminal — print a short confirmation
+	// instead for the human-facing table format. -o json/-o yaml keep going
+	// through renderTable so scripted pipelines still get valid, parseable
+	// output (`[{}]`/`- {}`) rather than plain text.
+	if len(cols) == 0 && (env.Format == "" || env.Format == "table") {
+		if !env.Quiet {
+			fmt.Fprintln(env.Out, "ok")
+		}
+		return nil
+	}
 	return renderTable(env.Out, env.Format, env.Quiet, env.NoColor, output.Table{Cols: cols, Rows: []output.Row{output.Row(m)}})
 }

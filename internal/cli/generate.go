@@ -28,16 +28,19 @@ const generateProviderTF = `terraform {
 provider "systeam" {}
 `
 
-// newGenerateCmd is the `generate` command group's parent. It has one child
-// today (`terraform`); grouping it this way means a future `generate
-// ansible`/`generate pulumi` (see the providers-sdk-refactor plan) slots in
-// as a sibling subcommand without renaming this one.
+// newGenerateCmd is the `generate` command group's parent. It has two
+// children today (`terraform`, `opentofu` -- both drive the same renderer,
+// since the `systeam` provider resolves identically on both registries and
+// the two tools consume the same HCL); grouping it this way means a future
+// `generate ansible`/`generate pulumi` (see the providers-sdk-refactor plan)
+// slots in as a sibling subcommand without renaming this one.
 func newGenerateCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "generate",
 		Short: "Generate infrastructure-as-code from live resources",
 	}
-	c.AddCommand(newGenerateTerraformCmd())
+	c.AddCommand(newGenerateHCLCmd("terraform", "Terraform"))
+	c.AddCommand(newGenerateHCLCmd("opentofu", "OpenTofu"))
 	return c
 }
 
@@ -70,22 +73,29 @@ func generateFileName(kind string) string {
 	}
 }
 
-// newGenerateTerraformCmd builds `generate terraform`: it only ever reads
-// (listFn/getFn) from the registry -- never create/update/delete -- so
-// running it against a live account is always safe.
-func newGenerateTerraformCmd() *cobra.Command {
+// newGenerateHCLCmd builds a `generate terraform`/`generate opentofu` leaf.
+// Both tools consume identical HCL (the `systeam` provider source resolves
+// on both registries), so this one function drives both -- tool selects the
+// subcommand's `Use` (and, via the "generate <tool>:" prefix, its error
+// messages), while label is only used in the human-facing success message
+// ("generated Terraform configuration" vs "generated OpenTofu configuration").
+// It only ever reads (listFn/getFn) from the registry -- never
+// create/update/delete -- so running it against a live account is always
+// safe.
+func newGenerateHCLCmd(tool, label string) *cobra.Command {
 	var (
 		outDir     string
 		typesFlag  string
 		checksFlag string
 		projectID  int
 	)
+	errPrefix := "generate " + tool
 	c := &cobra.Command{
-		Use:   "terraform",
-		Short: "Generate Terraform HCL + import blocks for live resources (read-only)",
+		Use:   tool,
+		Short: fmt.Sprintf("Generate %s HCL + import blocks for live resources (read-only)", label),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if outDir == "" {
-				return clierr.Config("generate terraform: --out <dir> is required")
+				return clierr.Config("%s: --out <dir> is required", errPrefix)
 			}
 			env, err := cmdEnv(cmd)
 			if err != nil {
@@ -95,7 +105,7 @@ func newGenerateTerraformCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			kinds, err := generateKinds(typesFlag)
+			kinds, err := generateKinds(errPrefix, typesFlag)
 			if err != nil {
 				return err
 			}
@@ -103,7 +113,7 @@ func newGenerateTerraformCmd() *cobra.Command {
 			if checksFlag != "" {
 				checkIDs, err = parseIDSet(checksFlag)
 				if err != nil {
-					return clierr.Config("generate terraform: invalid --check list: %v", err)
+					return clierr.Config("%s: invalid --check list: %v", errPrefix, err)
 				}
 			}
 			// --project only ever filters checks (the only in-scope kind
@@ -123,7 +133,7 @@ func newGenerateTerraformCmd() *cobra.Command {
 				}
 				items, err := r.listFn(env, &orgID)
 				if err != nil {
-					return clierr.Config("generate terraform: listing %s: %v", kind, err)
+					return clierr.Config("%s: listing %s: %v", errPrefix, kind, err)
 				}
 
 				ids := make([]int, 0, len(items))
@@ -144,7 +154,7 @@ func newGenerateTerraformCmd() *cobra.Command {
 				for _, id := range ids {
 					full, err := r.getFn(env, &orgID, id)
 					if err != nil {
-						return clierr.Config("generate terraform: getting %s %d: %v", kind, id, err)
+						return clierr.Config("%s: getting %s %d: %v", errPrefix, kind, id, err)
 					}
 					if kind == "check" && projectSet {
 						pid, ok := intFromAny(full["project_id"])
@@ -156,7 +166,7 @@ func newGenerateTerraformCmd() *cobra.Command {
 					label := labels.Unique(generate.HCLLabel(generateLabelBase(full, id)))
 					block, vars, err := generate.RenderResource(kind, id, label, full)
 					if err != nil {
-						return clierr.Config("generate terraform: rendering %s %d: %v", kind, id, err)
+						return clierr.Config("%s: rendering %s %d: %v", errPrefix, kind, id, err)
 					}
 					fileBlocks[kind] = append(fileBlocks[kind], block)
 					importLines = append(importLines, generate.RenderImport(tfType, label, id))
@@ -166,7 +176,7 @@ func newGenerateTerraformCmd() *cobra.Command {
 				}
 			}
 
-			return writeGenerateOutput(cmd, outDir, kinds, fileBlocks, importLines, varDecls)
+			return writeGenerateOutput(cmd, errPrefix, label, outDir, kinds, fileBlocks, importLines, varDecls)
 		},
 	}
 	c.Flags().StringVar(&outDir, "out", "", "output directory for generated .tf files (required; -o is taken by the global --output flag)")
@@ -182,11 +192,11 @@ func newGenerateTerraformCmd() *cobra.Command {
 // secret attribute was redacted into a variable) -- printing a stderr
 // warning naming those variables so the caller knows to set them before
 // `terraform apply`.
-func writeGenerateOutput(cmd *cobra.Command, outDir string, kinds []string, fileBlocks map[string][]string, importLines []string, varDecls map[string]bool) error {
+func writeGenerateOutput(cmd *cobra.Command, errPrefix, label, outDir string, kinds []string, fileBlocks map[string][]string, importLines []string, varDecls map[string]bool) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return clierr.Config("generate terraform: creating output directory %s: %v", outDir, err)
+		return clierr.Config("%s: creating output directory %s: %v", errPrefix, outDir, err)
 	}
-	if err := writeGenerateFile(outDir, "provider.tf", generateProviderTF); err != nil {
+	if err := writeGenerateFile(errPrefix, outDir, "provider.tf", generateProviderTF); err != nil {
 		return err
 	}
 	for _, kind := range kinds {
@@ -194,17 +204,17 @@ func writeGenerateOutput(cmd *cobra.Command, outDir string, kinds []string, file
 		if len(blocks) == 0 {
 			continue
 		}
-		if err := writeGenerateFile(outDir, generateFileName(kind), strings.Join(blocks, "\n\n")+"\n"); err != nil {
+		if err := writeGenerateFile(errPrefix, outDir, generateFileName(kind), strings.Join(blocks, "\n\n")+"\n"); err != nil {
 			return err
 		}
 	}
 	if len(importLines) > 0 {
-		if err := writeGenerateFile(outDir, "imports.tf", strings.Join(importLines, "\n\n")+"\n"); err != nil {
+		if err := writeGenerateFile(errPrefix, outDir, "imports.tf", strings.Join(importLines, "\n\n")+"\n"); err != nil {
 			return err
 		}
 	}
 	if len(varDecls) == 0 {
-		cmd.Printf("generated Terraform configuration in %s\n", outDir)
+		cmd.Printf("generated %s configuration in %s\n", label, outDir)
 		return nil
 	}
 
@@ -213,7 +223,7 @@ func writeGenerateOutput(cmd *cobra.Command, outDir string, kinds []string, file
 		decls = append(decls, d)
 	}
 	sort.Strings(decls) // every decl starts `variable "<name>" {...`, so string sort == sort by name
-	if err := writeGenerateFile(outDir, "variables.tf", strings.Join(decls, "\n\n")+"\n"); err != nil {
+	if err := writeGenerateFile(errPrefix, outDir, "variables.tf", strings.Join(decls, "\n\n")+"\n"); err != nil {
 		return err
 	}
 
@@ -221,13 +231,13 @@ func writeGenerateOutput(cmd *cobra.Command, outDir string, kinds []string, file
 	for _, d := range decls {
 		fmt.Fprintf(cmd.ErrOrStderr(), "  - %s\n", generateVariableName(d))
 	}
-	cmd.Printf("generated Terraform configuration in %s\n", outDir)
+	cmd.Printf("generated %s configuration in %s\n", label, outDir)
 	return nil
 }
 
-func writeGenerateFile(dir, name, content string) error {
+func writeGenerateFile(errPrefix, dir, name, content string) error {
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-		return clierr.Config("generate terraform: writing %s: %v", name, err)
+		return clierr.Config("%s: writing %s: %v", errPrefix, name, err)
 	}
 	return nil
 }
@@ -299,7 +309,7 @@ func parseIDSet(s string) (map[int]bool, error) {
 // generate.ResourceKinds, or empty for all of them) into the ordered list of
 // kinds in scope for this run. An unrecognized type name is a config error
 // (exit 2) rather than a silent no-op.
-func generateKinds(typesFlag string) ([]string, error) {
+func generateKinds(errPrefix, typesFlag string) ([]string, error) {
 	if typesFlag == "" {
 		return append([]string(nil), generate.ResourceKinds...), nil
 	}
@@ -324,8 +334,8 @@ func generateKinds(typesFlag string) ([]string, error) {
 			unknown = append(unknown, k)
 		}
 		sort.Strings(unknown)
-		return nil, clierr.Config("generate terraform: unknown --type value(s): %s (want %s)",
-			strings.Join(unknown, ", "), strings.Join(generate.ResourceKinds, ","))
+		return nil, clierr.Config("%s: unknown --type value(s): %s (want %s)",
+			errPrefix, strings.Join(unknown, ", "), strings.Join(generate.ResourceKinds, ","))
 	}
 	return kinds, nil
 }

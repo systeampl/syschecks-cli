@@ -13,6 +13,18 @@
 # (Attr.Secret must mirror the provider's Sensitive: true 1:1 — see the
 # package doc comment in schema.go for why).
 #
+# EXCLUDED (Phase 1): this script will list check's api_scenario_steps,
+# oidc_config, dns_records_config, and response_assertions as writable
+# string attrs, but do NOT add them to schema.go's check Attrs. The provider
+# declares them jsontypes.Normalized StringAttribute, but the syschecks SDK
+# returns them already JSON-decoded (map[string]any/[]any, not a JSON
+# string), so rendering them via schema.go's plain AttrString path hands
+# renderResource an HCL object/tuple for a string attribute — which
+# `terraform plan` hard-errors on for every check that has one set. Phase 1
+# defers complex/nested attrs anyway, so they're intentionally omitted from
+# the spec until render.go supports jsonencode(...)-wrapping a JSON-blob
+# attr kind.
+#
 # Usage:
 #   hack/extract-provider-schema.sh <provider-repo-path> <resource-dir>
 #   hack/extract-provider-schema.sh /home/destine/GIT/wlasne/terraform-provider-systeam check

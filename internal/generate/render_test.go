@@ -130,6 +130,88 @@ func TestRenderResourceSecretMapKey(t *testing.T) {
 	}
 }
 
+// TestRenderResourceSecretMapKeyBackendAddition covers a key that only the
+// SecretMapKeys expansion (Finding 2, part 1) added: bot_token is one of the
+// backend's SECRET_CONFIG_KEYS that the CLI's original list didn't carry. It
+// must redact to a var reference exactly like webhook_url does, not render
+// as a plaintext literal.
+func TestRenderResourceSecretMapKeyBackendAddition(t *testing.T) {
+	attrs := map[string]any{
+		"name":         "telegram-alerts",
+		"channel_type": "telegram",
+		"config": map[string]any{
+			"bot_token": "123456:ABC-realtoken",
+			"chat_id":   "-100123",
+		},
+		"organization_id": 7,
+	}
+
+	block, vars, err := renderResource("notification-channel", 13, "telegram_alerts", attrs)
+	if err != nil {
+		t.Fatalf("renderResource error: %v", err)
+	}
+
+	if strings.Contains(block, "123456:ABC-realtoken") {
+		t.Errorf("renderResource block leaked plaintext bot_token: %s", block)
+	}
+
+	wantLine := "bot_token = var.telegram_alerts_bot_token"
+	if !strings.Contains(block, wantLine) {
+		t.Errorf("renderResource block =\n%s\nwant line containing %q", block, wantLine)
+	}
+	wantNonSecretLine := `chat_id = "-100123"`
+	if !strings.Contains(block, wantNonSecretLine) {
+		t.Errorf("renderResource block =\n%s\nwant line containing %q", block, wantNonSecretLine)
+	}
+
+	wantVar := "variable \"telegram_alerts_bot_token\" {\n  type      = string\n  sensitive = true\n}"
+	if !containsString(vars, wantVar) {
+		t.Errorf("renderResource vars = %v, want to contain %q", vars, wantVar)
+	}
+}
+
+// TestRenderResourceMaskSentinelRedactedRegardlessOfKey is the
+// defense-in-depth backstop (Finding 2, part 2): a config value the backend
+// already masked to "******" must never be emitted as that literal string —
+// a later `terraform apply` would write "******" back over the real secret.
+// This must hold even for a key nobody has added to SecretMapKeys, so a
+// backend addition the CLI hasn't caught up with yet still can't leak a
+// masked-placeholder-as-literal into generated .tf.
+func TestRenderResourceMaskSentinelRedactedRegardlessOfKey(t *testing.T) {
+	attrs := map[string]any{
+		"name":         "future-channel",
+		"channel_type": "some-new-type",
+		"config": map[string]any{
+			"totally_new_secret_field": "******",
+			"channel":                  "#alerts",
+		},
+		"organization_id": 7,
+	}
+
+	block, vars, err := renderResource("notification-channel", 14, "future_channel", attrs)
+	if err != nil {
+		t.Fatalf("renderResource error: %v", err)
+	}
+
+	if strings.Contains(block, `"******"`) {
+		t.Errorf("renderResource block emitted mask sentinel as a literal: %s", block)
+	}
+
+	wantLine := "totally_new_secret_field = var.future_channel_totally_new_secret_field"
+	if !strings.Contains(block, wantLine) {
+		t.Errorf("renderResource block =\n%s\nwant line containing %q", block, wantLine)
+	}
+	wantNonSecretLine := `channel = "#alerts"`
+	if !strings.Contains(block, wantNonSecretLine) {
+		t.Errorf("renderResource block =\n%s\nwant line containing %q", block, wantNonSecretLine)
+	}
+
+	wantVar := "variable \"future_channel_totally_new_secret_field\" {\n  type      = string\n  sensitive = true\n}"
+	if !containsString(vars, wantVar) {
+		t.Errorf("renderResource vars = %v, want to contain %q", vars, wantVar)
+	}
+}
+
 func TestRenderResourceSkipsMissingAndNilAttrs(t *testing.T) {
 	attrs := map[string]any{
 		"organization_id": 1,

@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+// maskSentinel is the placeholder the backend substitutes for a secret
+// notification `config` value before returning it over the API (see
+// healthchecks-backend app/api/notification_channels.py). Any map value
+// that equals this sentinel is redacted the same way as a SecretMapKeys hit,
+// regardless of its key — a defense-in-depth backstop so a config key the
+// backend masks but that specs["notification-channel"].SecretMapKeys
+// doesn't (yet) list never gets written into generated .tf as a literal
+// "******": that placeholder would otherwise round-trip through a later
+// `terraform apply` and overwrite the real secret.
+const maskSentinel = "******"
+
 // renderResource renders one live resource's writable attributes as an HCL
 // `resource` block, in the order defined by specs[cliName].Attrs.
 //
@@ -90,9 +101,11 @@ func renderVariable(name string) string {
 // renderMapAttr renders an AttrMap attribute's value as a nested HCL object
 // literal, one level more indented than the enclosing resource block's
 // attributes. Keys are sorted for determinism. Any key present in
-// secretKeys is redacted behind a `var.<label>_<key>` reference — with the
-// variable declaration appended to *vars — instead of being rendered via
-// hclValue like the rest of the map's keys.
+// secretKeys, or whose value equals maskSentinel (the backend's
+// masked-secret placeholder — see maskSentinel's doc comment), is redacted
+// behind a `var.<label>_<key>` reference — with the variable declaration
+// appended to *vars — instead of being rendered via hclValue like the rest
+// of the map's keys.
 //
 // val is accepted as either map[string]any (the common JSON-decoded shape)
 // or map[string]string; any other shape (missing attr, wrong type from an
@@ -117,7 +130,8 @@ func renderMapAttr(val any, secretKeys []string, label string, vars *[]string) s
 	var b strings.Builder
 	b.WriteString("{\n")
 	for _, k := range keys {
-		if secret[k] {
+		masked := m[k] == maskSentinel
+		if secret[k] || masked {
 			varName := label + "_" + k
 			fmt.Fprintf(&b, "    %s = var.%s\n", k, varName)
 			*vars = append(*vars, renderVariable(varName))

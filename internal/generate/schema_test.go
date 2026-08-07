@@ -94,6 +94,29 @@ func TestCheckSpecSecretMatchesProviderSensitive(t *testing.T) {
 	}
 }
 
+// TestCheckSpecExcludesJSONBlobObjectAttrs guards against the plan-breaking
+// regression where the SDK hands back these four attrs already decoded as
+// map[string]any/[]any (not as a JSON string), even though the provider
+// declares them string (JSON) attrs. Rendering them via the AttrString path
+// would emit an HCL object/tuple into a string attribute, and `terraform
+// plan` hard-errors on that ("Inappropriate value for attribute: string
+// required") for any check that has one set — aborting the whole plan. Phase
+// 1 omits them rather than mis-render them; see schema.go's comment on the
+// check spec and hack/extract-provider-schema.sh for the full rationale.
+func TestCheckSpecExcludesJSONBlobObjectAttrs(t *testing.T) {
+	spec := specs["check"]
+	if spec == nil {
+		t.Fatal("specs[\"check\"] is nil")
+	}
+
+	excluded := []string{"api_scenario_steps", "oidc_config", "dns_records_config", "response_assertions"}
+	for _, name := range excluded {
+		if hasAttr(spec.Attrs, name) {
+			t.Errorf("specs[\"check\"] should NOT include JSON-blob-as-object attr %q (SDK returns it decoded, not as a JSON string; rendering it would hard-error terraform plan)", name)
+		}
+	}
+}
+
 func TestNotificationChannelSpecConfigMap(t *testing.T) {
 	spec := specs["notification-channel"]
 	if spec == nil {
@@ -119,6 +142,43 @@ func TestNotificationChannelSpecConfigMap(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("specs[\"notification-channel\"].SecretMapKeys should contain %q, got %v", "webhook_url", spec.SecretMapKeys)
+	}
+}
+
+// TestNotificationChannelSecretMapKeysMatchesBackend guards against the
+// security-fragility regression: the backend masks a larger set of
+// notification `config` keys to "******" (healthchecks-backend
+// app/api/notification_channels.py's SECRET_CONFIG_KEYS) than the CLI used
+// to redact. A key the backend masks but SecretMapKeys doesn't list would
+// come back from the API already masked, and get emitted as a literal
+// placeholder (e.g. `bot_token = "******"`) that a later `terraform apply`
+// would write back — overwriting the real secret. SecretMapKeys must be a
+// superset of the backend's set.
+func TestNotificationChannelSecretMapKeysMatchesBackend(t *testing.T) {
+	spec := specs["notification-channel"]
+	if spec == nil {
+		t.Fatal("specs[\"notification-channel\"] is nil")
+	}
+
+	backendSecretKeys := []string{
+		// Shared across channel types.
+		"api_key", "routing_key", "auth_token",
+		// Backend SECRET_CONFIG_KEYS additions.
+		"smtp_password", "bot_token", "access_token", "api_token",
+		"signing_secret", "webhook_secret", "account_sid", "auth_id",
+		"connection_id", "client_secret",
+	}
+	for _, k := range backendSecretKeys {
+		found := false
+		for _, got := range spec.SecretMapKeys {
+			if got == k {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("specs[\"notification-channel\"].SecretMapKeys missing backend-masked key %q, got %v", k, spec.SecretMapKeys)
+		}
 	}
 }
 

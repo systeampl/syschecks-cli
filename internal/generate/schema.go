@@ -145,12 +145,24 @@ var specs = map[string]*ResourceSpec{
 			// HCL-wise still a string, written as jsonencode(...)).
 			{Name: "http_headers", Kind: AttrString, Secret: true},         // Sensitive: true — commonly carries Authorization/API keys
 			{Name: "http_form_login_data", Kind: AttrString, Secret: true}, // Sensitive: true — typically contains {username, password}
-			{Name: "api_scenario_steps", Kind: AttrString},
 			{Name: "api_scenario_secrets", Kind: AttrString, Secret: true}, // Sensitive: true — write-only
-			{Name: "oidc_config", Kind: AttrString},
-			{Name: "dns_records_config", Kind: AttrString},
 			{Name: "check_source_critical", Kind: AttrString},
-			{Name: "response_assertions", Kind: AttrString},
+			// api_scenario_steps, oidc_config, dns_records_config, and
+			// response_assertions are declared string (JSON) attrs by the
+			// provider, but the SDK returns them decoded as
+			// map[string]any/[]any, not as a JSON-encoded string. Rendering
+			// them via the AttrString path would hand renderResource's
+			// caller an HCL object/tuple for a string attribute, which
+			// `terraform plan` hard-errors on ("Inappropriate value for
+			// attribute: string required") for every API-scenario, OIDC,
+			// DNS-multi-record, or response-assertion check — aborting the
+			// whole plan, not just drifting on this one attr. Phase 1 defers
+			// complex/nested attrs anyway (see hack/extract-provider-schema.sh
+			// and docs/superpowers/plans/2026-08-06-generate-tf-phase1.md), so
+			// they're omitted here rather than mis-rendered: the resulting
+			// drift-at-worst is far better than a hard plan error. Re-add
+			// them once render.go can jsonencode(...) an AttrKind that
+			// carries a JSON-blob-as-string semantic.
 		},
 	},
 	"notification-channel": {
@@ -165,9 +177,27 @@ var specs = map[string]*ResourceSpec{
 		// config is a MapAttribute[string]string; these are the keys (across the
 		// various channel_type configs) that carry secrets, so `generate` can mark
 		// them sensitive rather than emit them as plain HCL string literals.
+		//
+		// This is the union of the CLI's own guesses and the backend's
+		// authoritative SECRET_CONFIG_KEYS (healthchecks-backend
+		// app/api/notification_channels.py) — the set of config keys the
+		// backend masks to "******" before ever returning them. A key
+		// missing from this list but present in the backend's set would
+		// come back from the API already masked, and renderResource would
+		// happily emit it as a literal `key = "******"` in
+		// notification_channels.tf: a placeholder that a later `terraform
+		// apply` would write straight back, overwriting the real secret
+		// with the string "******". Keep this list a superset of the
+		// backend's, not just an independent guess — see also
+		// renderMapAttr's mask-sentinel check in render.go, which redacts
+		// any "******" value even if its key isn't listed here, as a
+		// defense-in-depth backstop for keys the backend adds later.
 		SecretMapKeys: []string{
-			"webhook_url", "url", "token", "api_key", "auth_token",
-			"integration_key", "routing_key", "password", "secret",
+			"access_token", "account_sid", "api_key", "api_token",
+			"auth_id", "auth_token", "bot_token", "client_secret",
+			"connection_id", "integration_key", "password", "routing_key",
+			"secret", "signing_secret", "smtp_password", "token", "url",
+			"webhook_secret", "webhook_url",
 		},
 	},
 	"team": {

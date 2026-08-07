@@ -223,6 +223,57 @@ func TestGenerateTerraformRequiresOut(t *testing.T) {
 	}
 }
 
+// TestGenerateOpentofuMatchesTerraform drives `generate opentofu` and
+// `generate terraform` against the same seeded org (check + notification
+// channel + team) into separate temp dirs, and asserts every file the
+// terraform run produces exists under the opentofu run with byte-identical
+// contents -- the two subcommands share one renderer, so their output must
+// never diverge.
+func TestGenerateOpentofuMatchesTerraform(t *testing.T) {
+	tfAPI := newFakeAPI(t)
+	seedGenerateOrg(tfAPI)
+	seedGenerateCheck(tfAPI)
+	seedGenerateNotification(tfAPI)
+	seedGenerateTeam(tfAPI)
+	tfDir := t.TempDir()
+	if out, err := runCLI(t, "", "generate", "terraform", "--org", "acme", "--out", tfDir); err != nil {
+		t.Fatalf("generate terraform: unexpected error: %v\noutput: %s", err, out)
+	}
+
+	tofuAPI := newFakeAPI(t)
+	seedGenerateOrg(tofuAPI)
+	seedGenerateCheck(tofuAPI)
+	seedGenerateNotification(tofuAPI)
+	seedGenerateTeam(tofuAPI)
+	tofuDir := t.TempDir()
+	if out, err := runCLI(t, "", "generate", "opentofu", "--org", "acme", "--out", tofuDir); err != nil {
+		t.Fatalf("generate opentofu: unexpected error: %v\noutput: %s", err, out)
+	}
+
+	entries, err := os.ReadDir(tfDir)
+	if err != nil {
+		t.Fatalf("reading terraform output dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("generate terraform wrote no files")
+	}
+	for _, e := range entries {
+		tfContent := readGenFile(t, tfDir, e.Name())
+		tofuContent := readGenFile(t, tofuDir, e.Name())
+		if tfContent != tofuContent {
+			t.Fatalf("%s differs between terraform and opentofu output:\nterraform:\n%s\nopentofu:\n%s", e.Name(), tfContent, tofuContent)
+		}
+	}
+
+	tofuEntries, err := os.ReadDir(tofuDir)
+	if err != nil {
+		t.Fatalf("reading opentofu output dir: %v", err)
+	}
+	if len(tofuEntries) != len(entries) {
+		t.Fatalf("opentofu wrote %d files, terraform wrote %d -- file sets differ", len(tofuEntries), len(entries))
+	}
+}
+
 func TestGenerateTerraformRejectsUnknownType(t *testing.T) {
 	api := newFakeAPI(t)
 	seedGenerateOrg(api)

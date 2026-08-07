@@ -9,13 +9,6 @@ import (
 // non-null spec attrs are emitted, in spec order, with read-only attrs
 // (status/id/created_at) excluded because they simply aren't in the check
 // spec — and the `=` signs are aligned to the longest emitted attr name.
-//
-// The fixture's live `type` is "http" — a legacy backend alias for
-// "uptime" (all real checks are stored as "uptime"; the systeam provider's
-// validator doesn't accept "http" at all) — so the emitted block must carry
-// the normalized "uptime", not the live value verbatim. See
-// TestRenderResourceNormalizesLegacyHTTPCheckType below for the dedicated
-// alias-normalization coverage.
 func TestRenderResourceGolden(t *testing.T) {
 	attrs := map[string]any{
 		"name":       "web",
@@ -38,7 +31,7 @@ func TestRenderResourceGolden(t *testing.T) {
 	// example listed url first.
 	want := `resource "systeam_check" "web" {
   name       = "web"
-  type       = "uptime"
+  type       = "http"
   project_id = 3
   interval   = 300
   url        = "https://x"
@@ -48,52 +41,6 @@ func TestRenderResourceGolden(t *testing.T) {
 	}
 	if len(vars) != 0 {
 		t.Errorf("renderResource vars = %v, want none (no secret attrs present)", vars)
-	}
-}
-
-// TestRenderResourceNormalizesLegacyHTTPCheckType covers the generate fix
-// itself: the systeampl/systeam provider's check.type validator accepts
-// ["heartbeat","uptime","icmp","tcp","udp","dns","ftp","mail","database",
-// "api_scenario","oidc"] — no "http". On the backend, "http" is a legacy
-// alias for "uptime" (checks are stored as "uptime"; the two values are
-// treated identically everywhere), so generate must emit "uptime" for a
-// live check whose type is the legacy "http", while leaving every other
-// type value — including "uptime" itself — untouched.
-func TestRenderResourceNormalizesLegacyHTTPCheckType(t *testing.T) {
-	block, _, err := renderResource("check", 5, "web", map[string]any{
-		"name": "web",
-		"type": "http",
-	})
-	if err != nil {
-		t.Fatalf("renderResource error: %v", err)
-	}
-	if !strings.Contains(block, `type = "uptime"`) {
-		t.Errorf("renderResource block =\n%s\nwant a line with type = \"uptime\" (http normalized)", block)
-	}
-	if strings.Contains(block, `"http"`) {
-		t.Errorf("renderResource block =\n%s\nwant no literal \"http\" (legacy alias must be normalized)", block)
-	}
-
-	block, _, err = renderResource("check", 6, "web2", map[string]any{
-		"name": "web2",
-		"type": "uptime",
-	})
-	if err != nil {
-		t.Fatalf("renderResource error: %v", err)
-	}
-	if !strings.Contains(block, `type = "uptime"`) {
-		t.Errorf("renderResource block =\n%s\nwant a line with type = \"uptime\" (already canonical, unchanged)", block)
-	}
-
-	block, _, err = renderResource("check", 7, "web3", map[string]any{
-		"name": "web3",
-		"type": "tcp",
-	})
-	if err != nil {
-		t.Fatalf("renderResource error: %v", err)
-	}
-	if !strings.Contains(block, `type = "tcp"`) {
-		t.Errorf("renderResource block =\n%s\nwant a line with type = \"tcp\" (non-http type left untouched)", block)
 	}
 }
 

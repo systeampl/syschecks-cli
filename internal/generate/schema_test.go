@@ -95,24 +95,50 @@ func TestCheckSpecSecretMatchesProviderSensitive(t *testing.T) {
 }
 
 // TestCheckSpecExcludesJSONBlobObjectAttrs guards against the plan-breaking
-// regression where the SDK hands back these four attrs already decoded as
+// regression where the SDK hands back these attrs already decoded as
 // map[string]any/[]any (not as a JSON string), even though the provider
-// declares them string (JSON) attrs. Rendering them via the AttrString path
-// would emit an HCL object/tuple into a string attribute, and `terraform
-// plan` hard-errors on that ("Inappropriate value for attribute: string
-// required") for any check that has one set — aborting the whole plan. Phase
-// 1 omits them rather than mis-render them; see schema.go's comment on the
-// check spec and hack/extract-provider-schema.sh for the full rationale.
+// declares them string (JSON, jsontypes.NormalizedType) attrs. Rendering
+// them via the AttrString path would emit an HCL object/tuple into a string
+// attribute, and `terraform plan` hard-errors on that ("Inappropriate value
+// for attribute: string required") for any check that has one set —
+// aborting the whole plan. check_source_critical is set on most checks, so
+// this exclusion is load-bearing, not a corner case.
+//
+// This is the full, principled set: the provider declares exactly 8
+// jsontypes.NormalizedType attrs on check (see
+// hack/extract-provider-schema.sh's "excluded-jsontype-nonsecret" status).
+// The 5 NOT marked Sensitive: true are unsafe to render (no escape hatch
+// from hclValue) and must be absent from Attrs; the 3 that ARE Sensitive:
+// true are safe and must stay present as Secret: true, since Attr.Secret
+// redirects rendering to a `var.<label>_<attr>` string reference instead of
+// ever running the decoded value through hclValue. Phase 1 omits the unsafe
+// 5 rather than mis-render them; see schema.go's comment on the check spec
+// and hack/extract-provider-schema.sh for the full rationale.
 func TestCheckSpecExcludesJSONBlobObjectAttrs(t *testing.T) {
 	spec := specs["check"]
 	if spec == nil {
 		t.Fatal("specs[\"check\"] is nil")
 	}
 
-	excluded := []string{"api_scenario_steps", "oidc_config", "dns_records_config", "response_assertions"}
+	excluded := []string{
+		"api_scenario_steps", "oidc_config", "dns_records_config",
+		"check_source_critical", "response_assertions",
+	}
 	for _, name := range excluded {
 		if hasAttr(spec.Attrs, name) {
-			t.Errorf("specs[\"check\"] should NOT include JSON-blob-as-object attr %q (SDK returns it decoded, not as a JSON string; rendering it would hard-error terraform plan)", name)
+			t.Errorf("specs[\"check\"] should NOT include non-secret jsontypes.NormalizedType attr %q (SDK returns it decoded, not as a JSON string; rendering it would hard-error terraform plan)", name)
+		}
+	}
+
+	secretJSONTypeAttrs := []string{"api_scenario_secrets", "http_form_login_data", "http_headers"}
+	for _, name := range secretJSONTypeAttrs {
+		a := findAttr(spec.Attrs, name)
+		if a == nil {
+			t.Errorf("specs[\"check\"] should include secret jsontypes.NormalizedType attr %q (safe: redacted to a var reference, never rendered via hclValue)", name)
+			continue
+		}
+		if !a.Secret {
+			t.Errorf("specs[\"check\"] attr %q must be Secret: true (it's a jsontypes.NormalizedType attr, only safe to keep because Attr.Secret redirects rendering away from hclValue)", name)
 		}
 	}
 }

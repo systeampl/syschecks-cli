@@ -143,26 +143,43 @@ var specs = map[string]*ResourceSpec{
 			{Name: "assigned_agent_ids", Kind: AttrList},
 			// JSON-object/array fields (jsontypes.Normalized StringAttribute —
 			// HCL-wise still a string, written as jsonencode(...)).
+			//
+			// The provider declares exactly 8 attrs with CustomType:
+			// jsontypes.NormalizedType{}: http_headers, http_form_login_data,
+			// api_scenario_secrets (Sensitive: true, kept below) and
+			// api_scenario_steps, oidc_config, dns_records_config,
+			// check_source_critical, response_assertions (NOT Sensitive,
+			// excluded — see the comment block after these three).
+			//
+			// The rule (see also hack/extract-provider-schema.sh, which
+			// enforces it mechanically): every jsontypes.NormalizedType attr
+			// is dangerous to render via the plain AttrString path, because
+			// the SDK hands it back already JSON-decoded
+			// (map[string]any/[]any/{} for an unset one), not as a
+			// JSON-encoded string — so hclValue would emit an HCL
+			// object/tuple into a string attribute, which `terraform plan`
+			// hard-errors on ("Inappropriate value for attribute: string
+			// required"). A Secret: true jsontypes attr is exempted from
+			// that exclusion because renderResource never runs its value
+			// through hclValue at all: Attr.Secret redirects to a
+			// `var.<label>_<attr>` string reference (see render.go), which
+			// is a valid value for a string attribute regardless of what
+			// shape the underlying secret has. A non-secret jsontypes attr
+			// has no such escape hatch, so it must be excluded from Attrs
+			// entirely until render.go grows an AttrKind that
+			// jsonencode(...)s a decoded value back into a JSON string.
 			{Name: "http_headers", Kind: AttrString, Secret: true},         // Sensitive: true — commonly carries Authorization/API keys
 			{Name: "http_form_login_data", Kind: AttrString, Secret: true}, // Sensitive: true — typically contains {username, password}
 			{Name: "api_scenario_secrets", Kind: AttrString, Secret: true}, // Sensitive: true — write-only
-			{Name: "check_source_critical", Kind: AttrString},
-			// api_scenario_steps, oidc_config, dns_records_config, and
-			// response_assertions are declared string (JSON) attrs by the
-			// provider, but the SDK returns them decoded as
-			// map[string]any/[]any, not as a JSON-encoded string. Rendering
-			// them via the AttrString path would hand renderResource's
-			// caller an HCL object/tuple for a string attribute, which
-			// `terraform plan` hard-errors on ("Inappropriate value for
-			// attribute: string required") for every API-scenario, OIDC,
-			// DNS-multi-record, or response-assertion check — aborting the
-			// whole plan, not just drifting on this one attr. Phase 1 defers
-			// complex/nested attrs anyway (see hack/extract-provider-schema.sh
-			// and docs/superpowers/plans/2026-08-06-generate-tf-phase1.md), so
-			// they're omitted here rather than mis-rendered: the resulting
-			// drift-at-worst is far better than a hard plan error. Re-add
-			// them once render.go can jsonencode(...) an AttrKind that
-			// carries a JSON-blob-as-string semantic.
+			// Excluded (non-secret jsontypes.NormalizedType — see rule
+			// above): api_scenario_steps, oidc_config, dns_records_config,
+			// check_source_critical, response_assertions. Phase 1 already
+			// defers complex/nested attrs (see
+			// docs/superpowers/plans/2026-08-06-generate-tf-phase1.md), so
+			// omitting these is drift-at-worst — far better than the hard
+			// plan error rendering them would cause. check_source_critical
+			// in particular is set (non-empty) on most checks, so this
+			// exclusion is load-bearing, not a corner case.
 		},
 	},
 	"notification-channel": {

@@ -48,7 +48,12 @@ func init() {
 			}
 			return toMap(c)
 		},
-		createFn: func(env *cmdCtx, _ *int, body map[string]any) (map[string]any, error) {
+		createFn: func(env *cmdCtx, orgID *int, body map[string]any) (map[string]any, error) {
+			if orgID != nil {
+				if _, ok := body["organization_id"]; !ok {
+					body["organization_id"] = *orgID
+				}
+			}
 			b, err := mapToBody[models.NotificationChannelCreate](body)
 			if err != nil {
 				return nil, err

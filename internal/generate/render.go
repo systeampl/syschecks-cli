@@ -17,20 +17,6 @@ import (
 // `terraform apply` and overwrite the real secret.
 const maskSentinel = "******"
 
-// checkTypeAliases maps a check's legacy `type` value to the canonical
-// value the systeampl/systeam Terraform provider's validator accepts. The
-// backend treats "http" as a legacy alias for "uptime" (check.type in
-// ("http","uptime") is handled identically everywhere; all real checks are
-// stored as "uptime", never "http"), but the provider's schema only lists
-// "uptime" among its valid check types — a live check surfaced with the
-// legacy "http" value would otherwise render a `type = "http"` attribute
-// that fails `terraform plan` validation. This map is intentionally scoped
-// to the check resource's `type` attribute only; it must not be applied to
-// any other attribute or resource.
-var checkTypeAliases = map[string]string{
-	"http": "uptime",
-}
-
 // renderResource renders one live resource's writable attributes as an HCL
 // `resource` block, in the order defined by specs[cliName].Attrs.
 //
@@ -69,14 +55,6 @@ func renderResource(cliName string, id int, label string, attrs map[string]any) 
 		val, present := attrs[a.Name]
 		if !present || val == nil {
 			continue
-		}
-
-		if cliName == "check" && a.Name == "type" {
-			if s, ok := val.(string); ok {
-				if canonical, aliased := checkTypeAliases[s]; aliased {
-					val = canonical
-				}
-			}
 		}
 
 		var rendered string

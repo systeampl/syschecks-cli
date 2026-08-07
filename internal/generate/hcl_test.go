@@ -1,6 +1,57 @@
 package generate
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/hashicorp/hcl/v2/hclparse"
+	"github.com/zclconf/go-cty/cty"
+)
+
+// parseHCLAttrValue writes `attr = <hclSrc>` to a real HCL parser
+// (hashicorp/hcl/v2, the library terraform itself uses) and returns the
+// evaluated attribute value. It fails the test if the source doesn't parse
+// or the attribute can't be evaluated, so callers can assert generated HCL
+// is actually valid rather than merely matching an expected string.
+func parseHCLAttrValue(t *testing.T, hclSrc string) cty.Value {
+	t.Helper()
+	src := fmt.Sprintf("attr = %s\n", hclSrc)
+	p := hclparse.NewParser()
+	f, diags := p.ParseHCL([]byte(src), "test.tf")
+	if diags.HasErrors() {
+		t.Fatalf("HCL did not parse (src=%q): %s", src, diags.Error())
+	}
+	attrs, diags := f.Body.JustAttributes()
+	if diags.HasErrors() {
+		t.Fatalf("HCL attributes error (src=%q): %s", src, diags.Error())
+	}
+	attr, ok := attrs["attr"]
+	if !ok {
+		t.Fatalf("HCL missing attr (src=%q)", src)
+	}
+	val, diags := attr.Expr.Value(nil)
+	if diags.HasErrors() {
+		t.Fatalf("HCL eval error (src=%q): %s", src, diags.Error())
+	}
+	return val
+}
+
+// assertHCLStringRoundTrips renders content via hclValue, parses the result
+// with a real HCL parser, and checks the parsed value is the string
+// "content" unchanged — i.e. the escaping neither corrupts the value nor
+// (critically) lets it be reinterpreted as a template expression.
+func assertHCLStringRoundTrips(t *testing.T, content string) {
+	t.Helper()
+	rendered := hclValue(content)
+	val := parseHCLAttrValue(t, rendered)
+	if val.Type() != cty.String {
+		t.Fatalf("hclValue(%q) = %s parsed as non-string: %#v", content, rendered, val)
+	}
+	if got := val.AsString(); got != content {
+		t.Errorf("hclValue(%q) = %s, round-tripped through HCL parser as %q, want %q", content, rendered, got, content)
+	}
+}
 
 func TestHCLValueString(t *testing.T) {
 	got := hclValue("a\"b")
@@ -36,6 +87,25 @@ func TestHCLValueFloatWithFraction(t *testing.T) {
 	got := hclValue(1.5)
 	if got != "1.5" {
 		t.Errorf("hclValue(1.5) = %s, want 1.5", got)
+	}
+}
+
+// TestHCLValueHugeWholeNumberFloatNoOverflow guards float64(int64(val)) for
+// a whole-number float outside int64's range: converting it straight to
+// int64 is an implementation-defined truncation in Go, not a safe cast, and
+// can silently render the wrong number. The result must still be a valid
+// HCL number literal that round-trips through a real parser to the same
+// value.
+func TestHCLValueHugeWholeNumberFloatNoOverflow(t *testing.T) {
+	huge := 1e20 // whole number, far outside int64 range
+	rendered := hclValue(huge)
+	if strings.ContainsAny(rendered, "eE") {
+		t.Errorf("hclValue(1e20) = %s, want plain decimal digits, not exponential notation", rendered)
+	}
+	val := parseHCLAttrValue(t, rendered)
+	got, _ := val.AsBigFloat().Float64()
+	if got != huge {
+		t.Errorf("hclValue(1e20) = %s, round-tripped through HCL parser as %v, want %v", rendered, got, huge)
 	}
 }
 
@@ -137,6 +207,24 @@ func TestHCLLabelFallbackWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestHCLLabelFallbackDiffersByInput guards against the empty-sanitization
+// fallback collapsing every unrelated input to the same fixed label (e.g.
+// always "r_1"), which would silently merge distinct resources' labels.
+func TestHCLLabelFallbackDiffersByInput(t *testing.T) {
+	a := hclLabel("###")
+	b := hclLabel("@@@")
+	c := hclLabel("")
+	if a == b || a == c || b == c {
+		t.Errorf("fallback labels not distinct: hclLabel(###)=%q hclLabel(@@@)=%q hclLabel(\"\")=%q", a, b, c)
+	}
+}
+
+func TestHCLLabelFallbackDeterministic(t *testing.T) {
+	if hclLabel("###") != hclLabel("###") {
+		t.Errorf("hclLabel(###) not deterministic across calls")
+	}
+}
+
 func TestLabelSetDedupesOnCollision(t *testing.T) {
 	ls := newLabelSet()
 	first := ls.unique("web")
@@ -175,5 +263,94 @@ func TestLabelSetIndependentBases(t *testing.T) {
 	db := ls.unique("db")
 	if web != "web" || db != "db" {
 		t.Errorf("independent bases collided: web=%q db=%q", web, db)
+	}
+}
+
+// TestLabelSetCrossBaseCollision reproduces the review-reported bug: a
+// per-base counter alone lets a name that the set would itself generate for
+// one base (e.g. "web_2" from repeated "web") get handed out a second time
+// once "web" collides again, if some other call already claimed that exact
+// suffixed string. All three calls below must yield distinct labels.
+func TestLabelSetCrossBaseCollision(t *testing.T) {
+	ls := newLabelSet()
+	first := ls.unique("web")    // "web"
+	second := ls.unique("web_2") // literal "web_2", handed in directly
+	third := ls.unique("web")    // must NOT collide with "web_2" above
+
+	if first != "web" {
+		t.Errorf("first unique(web) = %q, want web", first)
+	}
+	if second != "web_2" {
+		t.Errorf("unique(web_2) = %q, want web_2", second)
+	}
+	if third == second {
+		t.Errorf("unique(web) second call collided with unique(web_2): both %q", third)
+	}
+	seen := map[string]bool{}
+	for _, label := range []string{first, second, third} {
+		if seen[label] {
+			t.Errorf("label %q handed out more than once: %v", label, []string{first, second, third})
+		}
+		seen[label] = true
+	}
+}
+
+// --- HCL-parser-verified escaping (regression coverage for review findings) ---
+
+func TestHCLValueTemplateInterpolationEscaped(t *testing.T) {
+	// Unescaped, HCL would evaluate "${1+1}" as the expression 1+1 = 2
+	// instead of keeping it as a literal string.
+	assertHCLStringRoundTrips(t, "${1+1}")
+}
+
+func TestHCLValueTemplateDirectiveEscaped(t *testing.T) {
+	assertHCLStringRoundTrips(t, "%{if true}x%{endif}")
+}
+
+func TestHCLValueDoubleDollarAndPercentRoundTrip(t *testing.T) {
+	assertHCLStringRoundTrips(t, "price is $$5 and 50%%")
+}
+
+func TestHCLValueBareDollarAndPercentNotOverEscaped(t *testing.T) {
+	// A lone "$" or "%" not immediately followed by "{" is not special in
+	// HCL and must survive unchanged — doubling it unconditionally would
+	// corrupt extremely common values like prices and percentages.
+	assertHCLStringRoundTrips(t, "$5 off, save 50%")
+}
+
+func TestHCLValueMixedQuoteBackslashInterpolation(t *testing.T) {
+	assertHCLStringRoundTrips(t, `say "hi" \ then ${boom}`)
+}
+
+func TestHCLValueCarriageReturnEscaped(t *testing.T) {
+	assertHCLStringRoundTrips(t, "line1\r\nline2")
+}
+
+func TestHCLValueTabEscaped(t *testing.T) {
+	assertHCLStringRoundTrips(t, "a\tb")
+}
+
+func TestHCLValueNestedMapParsesAsValidHCL(t *testing.T) {
+	nested := map[string]any{
+		"outer1": "v1",
+		"outer2": map[string]any{
+			"inner1": "v2",
+			"inner2": "v3",
+		},
+	}
+	rendered := hclValue(nested)
+	val := parseHCLAttrValue(t, rendered)
+	if val.Type().IsObjectType() && !val.Type().HasAttribute("outer2") {
+		t.Errorf("hclValue(nested map) = %s, parsed object missing outer2", rendered)
+	}
+	outer2 := val.GetAttr("outer2")
+	if !outer2.Type().IsObjectType() || !outer2.Type().HasAttribute("inner1") {
+		t.Errorf("hclValue(nested map) = %s, outer2 is not a nested object with inner1: %#v", rendered, outer2)
+	}
+	if got := val.GetAttr("outer1").AsString(); got != "v1" {
+		t.Errorf("nested map outer1 = %q, want v1", got)
+	}
+	if got := outer2.GetAttr("inner2").AsString(); got != "v3" {
+		t.Errorf("nested map outer2.inner2 = %q, want v3", got)
 	}
 }

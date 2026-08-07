@@ -2,6 +2,8 @@ package generate
 
 import (
 	"fmt"
+	"hash/fnv"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,8 +27,18 @@ func hclValue(v any) string {
 	case int64:
 		return strconv.FormatInt(val, 10)
 	case float64:
-		if val == float64(int64(val)) {
-			return strconv.FormatInt(int64(val), 10)
+		// float64(int64(val)) is only a safe round-trip check within
+		// int64's range; converting an out-of-range float straight to
+		// int64 is an implementation-defined truncation in Go, not a
+		// value-preserving cast. Guard the range first, and for a
+		// whole-number float outside it, print plain decimal digits (via
+		// FormatFloat's 'f' verb) rather than int64-overflowing or falling
+		// into 'g' verb's exponential notation.
+		if !math.IsInf(val, 0) && val == math.Trunc(val) {
+			if val >= math.MinInt64 && val <= math.MaxInt64 {
+				return strconv.FormatInt(int64(val), 10)
+			}
+			return strconv.FormatFloat(val, 'f', -1, 64)
 		}
 		return strconv.FormatFloat(val, 'g', -1, 64)
 	case []any:
@@ -60,11 +72,30 @@ func hclValue(v any) string {
 }
 
 // quoteHCLString renders s as an HCL double-quoted string literal, escaping
-// backslashes, double quotes, and newlines.
+// backslashes, double quotes, newlines, carriage returns, tabs, and template
+// interpolation/directive markers.
+//
+// HCL's template syntax treats the two-character sequences "${" and "%{" as
+// the start of an interpolation or control directive, not the literal
+// characters — e.g. `"${1+1}"` evaluates to the number 2. Left unescaped, an
+// SDK value containing either sequence (a URL, a k8s/compose snippet, a
+// description mentioning a shell variable, ...) gets silently reinterpreted
+// as an expression instead of being written back verbatim, which can also
+// leak whatever happens to be in scope.
+//
+// The escape is doubling ("$${", "%%{"), and it only applies when the
+// dollar/percent sign is immediately followed by "{" — HCL does not fold
+// "$$"/"%%" outside of that context, so a bare "$" or "%" (e.g. "$5",
+// "50%", a Windows env-style "%PATH%") is left untouched. Verified against
+// hashicorp/hcl/v2's parser: unconditionally doubling every "$"/"%" round-trips
+// "a$b" back as "a$$b" — corrupting the very common case of a lone currency
+// or percent sign — whereas the followed-by-"{" rule round-trips correctly
+// for both plain values and interpolation/directive markers.
 func quoteHCLString(s string) string {
+	runes := []rune(s)
 	var b strings.Builder
 	b.WriteByte('"')
-	for _, r := range s {
+	for i, r := range runes {
 		switch r {
 		case '\\':
 			b.WriteString(`\\`)
@@ -72,6 +103,15 @@ func quoteHCLString(s string) string {
 			b.WriteString(`\"`)
 		case '\n':
 			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '$', '%':
+			if i+1 < len(runes) && runes[i+1] == '{' {
+				b.WriteRune(r)
+			}
+			b.WriteRune(r)
 		default:
 			b.WriteRune(r)
 		}
@@ -103,7 +143,15 @@ func hclLabel(s string) string {
 	label := strings.Trim(b.String(), "_")
 
 	if label == "" {
-		return "r_1"
+		// Every input that sanitizes to nothing (empty string, "###", "@@@",
+		// ...) would otherwise collapse to the same fixed fallback and
+		// collide. hclLabel is pure (no shared state to draw a counter
+		// from — see labelSet for that), so instead derive a fallback from
+		// a hash of the original input: different empty-sanitizing inputs
+		// get different fallback labels, deterministically.
+		h := fnv.New32a()
+		h.Write([]byte(s))
+		return fmt.Sprintf("r_%d", h.Sum32())
 	}
 	if label[0] >= '0' && label[0] <= '9' {
 		return "r_" + label
@@ -113,22 +161,43 @@ func hclLabel(s string) string {
 
 // labelSet deduplicates HCL labels, appending "_2", "_3", ... on repeated
 // calls with the same base string so generated resources never collide.
+//
+// Tracking a per-base counter alone is not enough: if some other base
+// happens to collide with a suffixed name this set would have generated
+// (e.g. unique("web") -> "web", then a literal unique("web_2") is handed
+// in, then unique("web") again), a counter that only tracks how many times
+// "web" itself was requested would hand out "web_2" a second time. So this
+// tracks every label ever handed out and skips any candidate already taken,
+// not just an increasing suffix count.
 type labelSet struct {
-	counts map[string]int
+	used map[string]bool
+	next map[string]int // next suffix to try for a given base, once collided
 }
 
 // newLabelSet returns an empty, ready-to-use labelSet.
 func newLabelSet() *labelSet {
-	return &labelSet{counts: make(map[string]int)}
+	return &labelSet{used: make(map[string]bool), next: make(map[string]int)}
 }
 
-// unique returns base the first time it is seen, and base_2, base_3, ... on
-// each subsequent call with the same base.
+// unique returns base the first time it (or an equal candidate) is handed
+// out, and otherwise the first of base_2, base_3, ... not already handed
+// out by this labelSet — deterministic given the same sequence of calls.
 func (ls *labelSet) unique(base string) string {
-	n := ls.counts[base]
-	ls.counts[base] = n + 1
-	if n == 0 {
+	if !ls.used[base] {
+		ls.used[base] = true
 		return base
 	}
-	return fmt.Sprintf("%s_%d", base, n+1)
+	n := ls.next[base]
+	if n < 2 {
+		n = 2
+	}
+	for {
+		candidate := fmt.Sprintf("%s_%d", base, n)
+		if !ls.used[candidate] {
+			ls.used[candidate] = true
+			ls.next[base] = n + 1
+			return candidate
+		}
+		n++
+	}
 }

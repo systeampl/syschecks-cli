@@ -118,6 +118,36 @@ Only the subcommands the SysChecks API actually exposes for that resource are ge
 | `contact-method` | ✓ | – | ✓ | ✓ | ✓ | none | **no get**: the API has no single-contact-method lookup |
 | `integration-key` | ✓ | – | ✓ | – | ✓ (revoke) | required `--org` | **no get/update**: create-then-revoke only |
 
+### `generate` (Terraform/OpenTofu, read-only)
+
+```
+syschecks generate terraform --org <org> [--type check,notification-channel,team] [--project <id>] [--check <id>,...] --out ./iac/
+syschecks generate opentofu  --org <org> [--type check,notification-channel,team] [--project <id>] [--check <id>,...] --out ./iac/
+```
+
+`generate` reads your live SysChecks account and writes out HCL that reproduces it, for adopting existing resources into Terraform or OpenTofu instead of hand-writing config. `terraform` and `opentofu` are two names for the exact same generator — the `systeampl/systeam` provider source resolves on both registries, and the two subcommands share one renderer, so their output is byte-identical (`terraform` writes Terraform-flavored HCL that OpenTofu reads natively; the `opentofu` alias exists purely so the command you run matches the tool you're about to invoke).
+
+It only ever calls the read (`list`/`get`) side of the API — it never creates, updates, or deletes anything, so it's always safe to point at a live account.
+
+Scope flags:
+
+- `--type check,notification-channel,team` — limit which resource kinds to generate (default: all three; Phase 1 covers just these — more resource types are planned)
+- `--project <id>` — limit generated checks to one project (no-op for `notification-channel`/`team`, which aren't project-scoped)
+- `--check <id>,<id>,...` — limit generation to specific check ids
+
+`--out <dir>` is required and is created if missing. It's populated with:
+
+| file | contents |
+|---|---|
+| `provider.tf` | the fixed `terraform { required_providers { systeam = ... } }` + `provider "systeam" {}` block |
+| `checks.tf` / `notification_channels.tf` / `teams.tf` | one `resource` block per live resource of that kind (only written if `--type` selected that kind and it produced at least one) |
+| `imports.tf` | one `import { to = ..., id = ... }` block per generated resource, binding it to its live id |
+| `variables.tf` | one `sensitive = true` `variable` declaration per secret field that was redacted out of the resource blocks above (only written if at least one secret was found) |
+
+**Secrets are never inlined.** Any attribute the provider marks sensitive (e.g. a notification channel's webhook URL) is emitted as a reference to a `sensitive` variable in `variables.tf` instead of its live plaintext value — the plaintext itself is never written to disk. Supply the real values via `TF_VAR_<name>` (or your usual `terraform`/`tofu` var-passing mechanism) before running `plan`/`apply`; `generate` prints a `WARNING` listing every variable name it expects you to set.
+
+The `import` blocks are what let `terraform plan` / `tofu plan` adopt the existing resources instead of proposing to recreate them — the goal is a no-op plan on the first run once the sensitive variables are set. If the plan isn't a no-op, treat it the same as any other Terraform drift: adjust the generated HCL (or the live resource) until it converges.
+
 ### `apply -f` (declarative, multi-doc)
 
 ```

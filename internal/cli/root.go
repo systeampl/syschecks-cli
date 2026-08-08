@@ -44,7 +44,8 @@ func NewRootCmd() *cobra.Command {
 		newResourceCmd(registry["oncall-schedule"]), newResourceCmd(registry["escalation-policy"]),
 		newResourceCmd(registry["maintenance-window"]), newResourceCmd(registry["playbook"]),
 		newResourceCmd(registry["status-page"]), newLifecycleWatchCmd(),
-		newResourceCmd(registry["contact-method"]), newResourceCmd(registry["integration-key"]))
+		newResourceCmd(registry["contact-method"]), newResourceCmd(registry["integration-key"]),
+		newGenerateCmd())
 	return root
 }
 

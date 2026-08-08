@@ -95,6 +95,23 @@ func (f *fakeAPI) query(method, path string) url.Values {
 	return f.seen[method+" "+path]
 }
 
+// seenMethods returns the set of distinct HTTP methods the fake API has
+// received requests for so far, so a test can assert a command stayed
+// read-only (e.g. `generate`, which must never POST/PUT/PATCH/DELETE)
+// without having to enumerate every path it might hit.
+func (f *fakeAPI) seenMethods() map[string]bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]bool{}
+	for k := range f.seen {
+		method, _, ok := strings.Cut(k, " ")
+		if ok {
+			out[method] = true
+		}
+	}
+	return out
+}
+
 func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.seen[r.Method+" "+r.URL.Path] = r.URL.Query()

@@ -1,2 +1,5 @@
 /dist/
 /syschecks
+
+# Lokalne dokumenty robocze — nie trafiają do repo
+/docs/superpowers/

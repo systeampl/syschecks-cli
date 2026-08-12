@@ -414,13 +414,23 @@ func listChecksPaged(ctx context.Context, env *cmdCtx, orgID *int) ([]checkListI
 	var all []checkListItem
 	for page := 0; page < checkListMaxPages; page++ {
 		offset := page * checkListPageSize
-		raw, err := env.SDK.Checks.ListChecks(ctx, &models.ListChecksParams{
+		resp, err := env.SDK.Checks.ListChecks(ctx, &models.ListChecksParams{
 			OrgId:  orgID,
 			Limit:  intPtr(checkListPageSize),
 			Offset: intPtr(offset),
 		})
 		if err != nil {
 			return nil, clierr.Config("listing checks: %v", err)
+		}
+		// ListChecks returns parsed models since syschecks-go v0.4.0; round-trip
+		// through JSON to keep checkListItem as the single list shape here.
+		var raw []byte
+		if resp != nil {
+			if raw, err = json.Marshal(resp); err != nil {
+				return nil, clierr.Config("encoding checks list: %v", err)
+			}
+		} else {
+			raw = []byte("[]")
 		}
 		var items []checkListItem
 		if err := json.Unmarshal(raw, &items); err != nil {

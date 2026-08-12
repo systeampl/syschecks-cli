@@ -6,7 +6,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/itchyny/gojq v0.12.19
 	github.com/spf13/cobra v1.8.1
-	github.com/systeampl/syschecks-go v0.3.3
+	github.com/systeampl/syschecks-go v0.4.0
 	github.com/zclconf/go-cty v1.16.3
 	gopkg.in/yaml.v3 v3.0.1
 	sigs.k8s.io/yaml v1.6.0

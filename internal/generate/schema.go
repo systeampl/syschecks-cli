@@ -102,6 +102,10 @@ var specs = map[string]*ResourceSpec{
 			{Name: "content_match_text", Kind: AttrString},
 			{Name: "content_match_type", Kind: AttrString},
 			{Name: "content_match_case_sensitive", Kind: AttrBool},
+			// Content change / geo consistency monitoring.
+			{Name: "content_change_enabled", Kind: AttrBool},
+			{Name: "content_change_severity", Kind: AttrString},
+			{Name: "geo_content_consistency_enabled", Kind: AttrBool},
 			{Name: "http_form_login_enabled", Kind: AttrBool},
 			{Name: "http_form_login_url", Kind: AttrString},
 			{Name: "http_form_login_success_text", Kind: AttrString},
@@ -141,6 +145,7 @@ var specs = map[string]*ResourceSpec{
 			{Name: "expected_status_codes", Kind: AttrList},
 			{Name: "dns_expected_ips", Kind: AttrList},
 			{Name: "assigned_agent_ids", Kind: AttrList},
+			{Name: "content_ignore_patterns", Kind: AttrList},
 			// JSON-object/array fields (jsontypes.Normalized StringAttribute —
 			// HCL-wise still a string, written as jsonencode(...)).
 			//

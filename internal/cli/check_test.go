@@ -288,3 +288,33 @@ func TestCheckCreateSendsSelectorContentMatchFields(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckUpdateSendsEmptyStringToClearContentMatchText pins the clearing
+// half of the contract. The API clears a text field on "" and reads null as
+// "no change", so an explicitly-empty flag must survive to the wire as "";
+// dropping it (or sending null) would make the field unclearable from the CLI,
+// which is exactly the bug the web UI had.
+func TestCheckUpdateSendsEmptyStringToClearContentMatchText(t *testing.T) {
+	api := newFakeAPI(t)
+	var gotBody map[string]any
+	api.OnRequest("PUT", "/api/checks/4", func(r *http.Request) (int, any) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decoding update body: %v", err)
+		}
+		return 200, map[string]any{
+			"id": 4, "name": "x", "type": "uptime", "status": "UP",
+			"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "uuid": "u",
+		}
+	})
+
+	if _, err := runCLI(t, "", "check", "update", "4", "--content-match-text", ""); err != nil {
+		t.Fatalf("check update: %v", err)
+	}
+	v, present := gotBody["content_match_text"]
+	if !present {
+		t.Fatalf("content_match_text missing from update body — the field can never be cleared (body=%#v)", gotBody)
+	}
+	if v != "" {
+		t.Errorf("content_match_text = %#v, want \"\"", v)
+	}
+}

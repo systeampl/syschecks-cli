@@ -243,3 +243,48 @@ func TestCheckDelete(t *testing.T) {
 		t.Fatalf("check delete output = %q", out)
 	}
 }
+
+// TestCheckCreateSendsSelectorContentMatchFields guards the failure mode that
+// forced v0.3.1 off the release page: `check create` marshals through the SDK
+// model, so a field the SDK does not know is dropped between the flag and the
+// wire with no error anywhere.
+func TestCheckCreateSendsSelectorContentMatchFields(t *testing.T) {
+	api := newFakeAPI(t)
+	var gotBody map[string]any
+	api.OnRequest("POST", "/api/checks/", func(r *http.Request) (int, any) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decoding create POST body: %v", err)
+		}
+		return 200, map[string]any{
+			"id": 5, "name": "canonical", "type": "uptime", "status": "UP",
+			"created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "uuid": "u",
+		}
+	})
+
+	if _, err := runCLI(t, "", "check", "create",
+		"--project-id", "1", "--name", "canonical", "--type", "uptime",
+		"--url", "https://example.com",
+		"--content-match-enabled",
+		"--content-match-selector", "link[rel=canonical]",
+		"--content-match-extract", "attribute",
+		"--content-match-attribute", "href",
+		"--content-match-type", "equals",
+		"--content-match-text", "https://example.com/",
+	); err != nil {
+		t.Fatalf("check create: %v", err)
+	}
+
+	if gotBody == nil {
+		t.Fatal("check create never POSTed /api/checks/")
+	}
+	for field, want := range map[string]string{
+		"content_match_selector":  "link[rel=canonical]",
+		"content_match_extract":   "attribute",
+		"content_match_attribute": "href",
+		"content_match_type":      "equals",
+	} {
+		if gotBody[field] != want {
+			t.Errorf("create body %s = %v, want %q (body=%#v)", field, gotBody[field], want, gotBody)
+		}
+	}
+}

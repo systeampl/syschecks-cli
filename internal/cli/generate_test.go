@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -280,5 +281,43 @@ func TestGenerateTerraformRejectsUnknownType(t *testing.T) {
 	err := runCLIErr(t, "generate", "terraform", "--org", "acme", "--type", "bogus", "--out", t.TempDir())
 	if exitCode(err) != 2 {
 		t.Fatalf("generate terraform --type bogus: exit code = %d, want 2 (err=%v)", exitCode(err), err)
+	}
+}
+
+// TestGenerateTerraformEmitsSelectorContentMatch pins the second half of the
+// DOM-assertions surface: a check configured with a selector must round-trip
+// into HCL, otherwise `generate` silently produces config that drops the
+// assertion on the next apply.
+func TestGenerateTerraformEmitsSelectorContentMatch(t *testing.T) {
+	api := newFakeAPI(t)
+	seedGenerateOrg(api)
+	api.On("GET", "/api/checks/", 200, []map[string]any{
+		{"id": 101, "name": "web", "type": "uptime", "status": "UP"},
+	})
+	api.On("GET", "/api/checks/101", 200, map[string]any{
+		"id": 101, "name": "web", "type": "uptime", "status": "UP",
+		"project_id": 55, "url": "https://example.com", "interval": 60, "is_active": true,
+		"content_match_enabled": true, "content_match_type": "equals",
+		"content_match_selector":  "link[rel=canonical]",
+		"content_match_extract":   "attribute",
+		"content_match_attribute": "href",
+		"created_at":              "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z", "uuid": "u",
+	})
+
+	dir := t.TempDir()
+	if out, err := runCLI(t, "", "generate", "terraform", "--org", "acme", "--out", dir, "--type", "check"); err != nil {
+		t.Fatalf("generate terraform: %v\noutput: %s", err, out)
+	}
+
+	checksTF := readGenFile(t, dir, "checks.tf")
+	// Assert on key/value, not on the aligner's padding.
+	for key, want := range map[string]string{
+		"content_match_selector":  `"link[rel=canonical]"`,
+		"content_match_extract":   `"attribute"`,
+		"content_match_attribute": `"href"`,
+	} {
+		if !regexp.MustCompile(key + `\s+= ` + regexp.QuoteMeta(want)).MatchString(checksTF) {
+			t.Errorf("checks.tf missing %s = %s\ngot:\n%s", key, want, checksTF)
+		}
 	}
 }

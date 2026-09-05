@@ -102,6 +102,10 @@ var specs = map[string]*ResourceSpec{
 			{Name: "content_match_text", Kind: AttrString},
 			{Name: "content_match_type", Kind: AttrString},
 			{Name: "content_match_case_sensitive", Kind: AttrBool},
+			// Selector-scoped content match (DOM assertions).
+			{Name: "content_match_selector", Kind: AttrString},
+			{Name: "content_match_extract", Kind: AttrString},
+			{Name: "content_match_attribute", Kind: AttrString},
 			// Content change / geo consistency monitoring.
 			{Name: "content_change_enabled", Kind: AttrBool},
 			{Name: "content_change_severity", Kind: AttrString},
